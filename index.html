@@ -566,21 +566,44 @@
       const [clock, setClock] = useState(new Date());
       useEffect(() => { const iv = setInterval(() => setClock(new Date()), 1000); return () => clearInterval(iv); }, []);
 
+      const kst=new Date(clock.toLocaleString("en-US", {timeZone:"Asia/Seoul"}));
+      const nyc=new Date(clock.toLocaleString("en-US", {timeZone:"America/New_York"}));
+      const nyOpen=nyc.getHours()>=9 && nyc.getHours()<16;
+
       return (
-        <div style={{ background:C.bg, minHeight:"100vh", fontFamily:"'JetBrains Mono',monospace", color:C.text }}>
+        <div style={{ background:C.bg, minHeight:"100vh", fontFamily:"'JetBrains Mono','Courier New',monospace", color:C.text }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"0 16px", height:44, background:"#040608", borderBottom:`1px solid ${C.border}` }}>
-            <span style={{ fontFamily:"Space Grotesk", fontSize:16, fontWeight:700, color:C.accent }}>MACRO TERMINAL</span>
-            <span style={{ fontSize:10, color:C.muted }}>{clock.toLocaleTimeString("ko-KR",{hour12:false})}</span>
+            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+              <div style={{ width:3, height:22, background:C.accent, borderRadius:2 }} />
+              <span style={{ fontFamily:"Space Grotesk", fontSize:16, fontWeight:700, color:C.accent, letterSpacing:"0.05em" }}>MACRO TERMINAL</span>
+              <span style={{ fontSize:9, color:C.muted, background:C.panel, padding:"2px 8px", borderRadius:10, border:`1px solid ${C.border}` }}>GLOBAL MARKETS · TRADINGVIEW</span>
+            </div>
+            <div style={{ display:"flex", gap:16, fontSize:10, color:C.muted, alignItems:"center" }}>
+              <span>KST <span style={{ color:C.accent }}>{kst.toLocaleTimeString("ko-KR",{hour12:false})}</span></span>
+              <span>NYC <span style={{ color:C.gold }}>{nyc.toLocaleTimeString("en-US",{hour12:false})}</span></span>
+              <span style={{ color:nyOpen?C.green:C.red, fontSize:9, padding:"2px 8px", border:`1px solid ${(nyOpen?C.green:C.red)}55`, borderRadius:3 }}>● NYSE {nyOpen?"OPEN":"CLOSED"}</span>
+            </div>
           </div>
+
           <div style={{ borderBottom:`1px solid ${C.border}`, height:46, overflow:"hidden" }}>
             <TV type="ticker-tape" height={46} opts={{
-              symbols:[{proName:"FOREXCOM:SPXUSD",title:"S&P 500"},{proName:"FOREXCOM:NSXUSD",title:"NASDAQ 100"},{proName:"KRX:KOSPI",title:"KOSPI"},{proName:"BITSTAMP:BTCUSD",title:"BTC/USD"}],
+              symbols:[
+                {proName:"FOREXCOM:SPXUSD",title:"S&P 500"},{proName:"FOREXCOM:NSXUSD",title:"NASDAQ 100"},
+                {proName:"DJ:DJI",title:"DOW JONES"},{proName:"KRX:KOSPI",title:"KOSPI"},
+                {proName:"INDEX:NKY",title:"NIKKEI 225"},{proName:"INDEX:DEU40",title:"DAX"},
+                {proName:"INDEX:HSI",title:"항셍"},{proName:"SSE:000001",title:"상하이"},
+                {proName:"BITSTAMP:BTCUSD",title:"BTC/USD"},{proName:"BITSTAMP:ETHUSD",title:"ETH/USD"},
+                {proName:"FOREXCOM:USDKRW",title:"USD/KRW"},{proName:"FOREXCOM:USDJPY",title:"USD/JPY"},
+                {proName:"COMEX:GC1!",title:"금 선물"},{proName:"NYMEX:CL1!",title:"WTI 원유"},
+              ],
               showSymbolLogo:false, displayMode:"adaptive"
             }} />
           </div>
-          <div style={{ padding:"12px", display:"flex", flexDirection:"column", gap:12 }}>
+
+          <div style={{ padding:"10px 12px", display:"flex", flexDirection:"column", gap:10 }}>
             <CapitalFlowHero />
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1.2fr 1fr", gap:12 }}>
+
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
               <Box title="FX & Trends"><FXWithSparkline /></Box>
               <Box title="Market Insight">
                 <div style={{padding:"12px", fontSize:11, lineHeight:1.6}}>
@@ -589,14 +612,24 @@
                   <div style={{marginTop:10, color:C.gold, fontSize:10}}>{JARVIS_INSIGHT.strategy}</div>
                 </div>
               </Box>
-              <Box title="System Status" badge={<span style={{fontSize:9, color:C.green}}>ONLINE</span>}>
-                 <div style={{padding:"12px", display:"flex", flexDirection:"column", gap:8}}>
-                    <div style={{fontSize:10, color:C.muted}}>자금 흐름 데이터: <span style={{color:C.text}}>계절성 시뮬레이션 v2</span></div>
-                    <div style={{fontSize:10, color:C.muted}}>분석 엔진: <span style={{color:C.accent}}>Jarvis Core 3.1</span></div>
-                    <div style={{fontSize:10, color:C.muted}}>연결 상태: <span style={{color:C.green}}>정상</span></div>
+              <Box title="Crypto & Status" badge={<span style={{fontSize:9, color:C.green}}>ONLINE</span>}>
+                 <CryptoLive />
+                 <div style={{padding:"8px 12px", borderTop:`1px solid ${C.border}`, marginTop:5}}>
+                    <div style={{fontSize:9, color:C.muted}}>분석 엔진: <span style={{color:C.accent}}>Jarvis Core 3.1</span></div>
+                    <div style={{fontSize:9, color:C.muted}}>데이터: <span style={{color:C.text}}>Sim v2.5</span></div>
                  </div>
               </Box>
             </div>
+
+            <Box title="글로벌 증시 · Global Indices" badge={<span style={{fontSize:9,color:C.green}}>● TRADINGVIEW REAL-TIME</span>}>
+              <TV type="market-overview" height={220} opts={{
+                dateRange:"1D", showChart:true,
+                tabs:[
+                  {title:"주요 지수",symbols:[{s:"FOREXCOM:SPXUSD",d:"S&P 500"},{s:"FOREXCOM:NSXUSD",d:"NASDAQ 100"},{s:"DJ:DJI",d:"DOW JONES"},{s:"KRX:KOSPI",d:"KOSPI"},{s:"INDEX:NKY",d:"NIKKEI 225"},{s:"INDEX:DEU40",d:"DAX"}]},
+                  {title:"아시아",symbols:[{s:"KRX:KOSPI",d:"KOSPI"},{s:"INDEX:NKY",d:"NIKKEI"},{s:"INDEX:HSI",d:"항셍"},{s:"SSE:000001",d:"상하이"}]}
+                ]
+              }} />
+            </Box>
           </div>
         </div>
       );
