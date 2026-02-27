@@ -67,6 +67,19 @@
       { from:"crypto", to:"us_eq",  w:0.45, label:"기관 순환" },
     ];
 
+    // ── JARVIS INSIGHT (2026-02-28) ─────────────────────────────
+    const JARVIS_INSIGHT = {
+      date: "2026-02-28",
+      macro: {
+        vix: 14.5,
+        fearGreed: 42,
+        us10y: 4.25,
+        usdkrw: 1325
+      },
+      summary: "시장 공포(VIX)는 낮으나 심리(CNN)는 Neutral 상태입니다. 환율 안정화로 코스피 반등 가능성이 높습니다.",
+      strategy: "KOSPI/금 비중 유지. 비트코인 67k 돌파 시 현금 비중 10% 추가 투입 권고."
+    };
+
     // ── TradingView 위젯 ─────────────────────────────────────────
     function TV({ type, opts, height }) {
       const ref = useRef(null);
