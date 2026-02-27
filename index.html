@@ -153,6 +153,25 @@
       return <circle cx={`${x*100}%`} cy={`${y*100}%`} r={r} fill={color} opacity={(opacity||0.65)*(0.4+p*0.6)} />;
     }
 
+    function Sparkline({ data, color, width=80, height=28 }) {
+      if (!data || data.length < 2) return null;
+      const min = Math.min(...data), max = Math.max(...data);
+      const range = max - min || 1;
+      const pts = data.map((v,i) => {
+        const x = (i / (data.length-1)) * width;
+        const y = height - ((v - min) / range) * (height - 4) - 2;
+        return `${x},${y}`;
+      }).join(" ");
+      const last = data[data.length-1], first = data[0];
+      const up = last >= first;
+      const lineColor = up ? "#00e676" : "#ff1744";
+      return (
+        <svg width={width} height={height} style={{display:"block"}}>
+          <polyline points={pts} fill="none" stroke={lineColor} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
+        </svg>
+      );
+    }
+
     function CapitalFlowHero() {
       const [monthIdx, setMonthIdx] = useState(new Date().getMonth());
       const [playing, setPlaying] = useState(false);
@@ -251,75 +270,115 @@
 
           <div style={{display:"flex", height:520}}>
             <div style={{flex:1, position:"relative"}}>
-              <svg width="100%" height="100%" style={{display:"block"}}>
-                <defs>
-                  <filter id="glow2"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-                  <filter id="glow-xl"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-                </defs>
-                {edges.map(e => {
-                  const f = NODES.find(n=>n.id===e.from), t = NODES.find(n=>n.id===e.to);
-                  if (!f||!t) return null;
-                  const cfg = TIER_CFG[e.tier];
-                  const tc = TIER_COLORS[e.tier];
-                  const x1=f.x*100, y1=f.y*100, x2=t.x*100, y2=t.y*100;
-                  const mx=(x1+x2)/2+(y2-y1)*0.18, my=(y1+y2)/2-(x2-x1)*0.18;
-                  const d=`M${x1}% ${y1}% Q${mx}% ${my}% ${x2}% ${y2}%`;
-                  const isHovered = hoveredEdge === `${e.from}-${e.to}`;
-                  const sw = cfg.strokeW * (0.5 + e.w * 1.2) * (isHovered ? 1.8 : 1);
-                  return (
-                    <g key={`${e.from}-${e.to}`} onMouseEnter={()=>setHoveredEdge(`${e.from}-${e.to}`)} onMouseLeave={()=>setHoveredEdge(null)} style={{cursor:"pointer"}}>
-                      {e.tier==="xl" && <path d={d} stroke={tc} strokeWidth={sw*3} strokeOpacity={0.07} fill="none" filter="url(#glow-xl)"/>}
-                      {e.tier==="lg" && <path d={d} stroke={tc} strokeWidth={sw*2} strokeOpacity={0.06} fill="none" filter="url(#glow2)"/>}
-                      <path d={d} stroke={isHovered?tc:f.color} strokeWidth={sw} strokeOpacity={isHovered?0.95:0.3+e.w*0.45} fill="none" strokeDasharray={e.tier==="xl"?"none":e.tier==="lg"?"10 4":"6 6"}/>
-                      <text x={`${mx}%`} y={`${my}%`} textAnchor="middle" dy="-7" fill={tc} fontSize={cfg.labelSize} fontWeight="700" fontFamily="JetBrains Mono,monospace" opacity={isHovered?1:0.8} filter={e.tier==="xl"||isHovered?"url(#glow2)":"none"}>
-                        ${e.amount}B
-                      </text>
-                      {isHovered && (
-                        <text x={`${mx}%`} y={`${my}%`} textAnchor="middle" dy="6" fill="#fff" fontSize="8" fontFamily="JetBrains Mono,monospace" opacity="0.7"> {e.label} </text>
-                      )}
-                    </g>
-                  );
-                })}
-                {particles.current.map(p => {
-                  const f=NODES.find(n=>n.id===p.from), t=NODES.find(n=>n.id===p.to);
-                  return f&&t ? <Particle key={p.id} from={f} to={t} speed={p.speed} color={p.color} maxR={p.maxR} opacity={p.opacity}/> : null;
-                })}
-                {NODES.map(nd => {
-                  const pulse = Math.sin(tick*0.06+nd.x*8)*0.1+0.9;
-                  const inFlow = edges.filter(e=>e.to===nd.id).reduce((s,e)=>s+e.amount,0);
-                  const outFlow = edges.filter(e=>e.from===nd.id).reduce((s,e)=>s+e.amount,0);
-                  const netFlow = inFlow - outFlow;
-                  const netColor = netFlow > 0 ? C.green : netFlow < 0 ? C.red : nd.color;
-                  return (
-                    <g key={nd.id}>
-                      <circle cx={`${nd.x*100}%`} cy={`${nd.y*100}%`} r={nd.r*pulse*1.1} fill={nd.color} opacity="0.03"/>
-                      <circle cx={`${nd.x*100}%`} cy={`${nd.y*100}%`} r={nd.r*0.65} fill={nd.color} opacity="0.08" filter="url(#glow2)"/>
-                      <circle cx={`${nd.x*100}%`} cy={`${nd.y*100}%`} r={nd.r*0.42} fill={C.panel} stroke={nd.color} strokeWidth="1.8" strokeOpacity="0.8"/>
-                      <circle cx={`${nd.x*100}%`} cy={`${nd.y*100}%`} r={nd.r*0.5} fill="none" stroke={netColor} strokeWidth="2.5" strokeOpacity="0.35" strokeDasharray={`${Math.abs(netFlow)/10} 5`}/>
-                      <text x={`${nd.x*100}%`} y={`${nd.y*100}%`} textAnchor="middle" dy="-4" fill={nd.color} fontSize="10" fontWeight="700" fontFamily="JetBrains Mono,monospace">{nd.label}</text>
-                      <text x={`${nd.x*100}%`} y={`${nd.y*100}%`} textAnchor="middle" dy="6" fill={nd.color} fontSize="7.5" opacity="0.55" fontFamily="JetBrains Mono,monospace">{nd.en}</text>
-                      <text x={`${nd.x*100}%`} y={`${nd.y*100}%`} textAnchor="middle" dy="16" fill={netColor} fontSize="8" fontWeight="700" fontFamily="JetBrains Mono,monospace" opacity="0.85">
-                        {netFlow>0?`+${netFlow}B`:`${netFlow}B`}
-                      </text>
-                    </g>
-                  );
-                })}
-                <g transform="translate(8,8)">
-                  <rect x="0" y="0" width="115" height="86" rx="4" fill="#08101a" opacity="0.85"/>
-                  <text x="8" y="15" fill={C.muted} fontSize="8" fontFamily="JetBrains Mono,monospace" fontWeight="700">자금 규모 범례</text>
-                  {Object.entries(TIER_CFG).map(([tier,cfg],i)=>{
-                    const tc=TIER_COLORS[tier];
-                    const ranges={xl:">$300B",lg:"$150-300B",md:"$80-150B",sm:"<$80B"};
+              {flowTab === "map" && (
+                <svg width="100%" height="100%" style={{display:"block"}}>
+                  <defs>
+                    <filter id="glow2"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                    <filter id="glow-xl"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                  </defs>
+                  {edges.map(e => {
+                    const f = NODES.find(n=>n.id===e.from), t = NODES.find(n=>n.id===e.to);
+                    if (!f||!t) return null;
+                    const cfg = TIER_CFG[e.tier];
+                    const tc = TIER_COLORS[e.tier];
+                    const x1=f.x*100, y1=f.y*100, x2=t.x*100, y2=t.y*100;
+                    const mx=(x1+x2)/2+(y2-y1)*0.18, my=(y1+y2)/2-(x2-x1)*0.18;
+                    const d=`M${x1}% ${y1}% Q${mx}% ${my}% ${x2}% ${y2}%`;
+                    const isHovered = hoveredEdge === `${e.from}-${e.to}`;
+                    const sw = cfg.strokeW * (0.5 + e.w * 1.2) * (isHovered ? 1.8 : 1);
                     return (
-                      <g key={tier} transform={`translate(8,${22+i*16})`}>
-                        <circle r={cfg.maxR*0.65} cx="6" cy="4" fill={tc} opacity="0.85"/>
-                        <line x1="14" y1="4" x2="30" y2="4" stroke={tc} strokeWidth={cfg.strokeW*0.7} opacity="0.7"/>
-                        <text x="34" y="8" fill={tc} fontSize="9" fontFamily="JetBrains Mono,monospace">{ranges[tier]}</text>
+                      <g key={`${e.from}-${e.to}`} onMouseEnter={()=>setHoveredEdge(`${e.from}-${e.to}`)} onMouseLeave={()=>setHoveredEdge(null)} style={{cursor:"pointer"}}>
+                        {e.tier==="xl" && <path d={d} stroke={tc} strokeWidth={sw*3} strokeOpacity={0.07} fill="none" filter="url(#glow-xl)"/>}
+                        {e.tier==="lg" && <path d={d} stroke={tc} strokeWidth={sw*2} strokeOpacity={0.06} fill="none" filter="url(#glow2)"/>}
+                        <path d={d} stroke={isHovered?tc:f.color} strokeWidth={sw} strokeOpacity={isHovered?0.95:0.3+e.w*0.45} fill="none" strokeDasharray={e.tier==="xl"?"none":e.tier==="lg"?"10 4":"6 6"}/>
+                        <text x={`${mx}%`} y={`${my}%`} textAnchor="middle" dy="-7" fill={tc} fontSize={cfg.labelSize} fontWeight="700" fontFamily="JetBrains Mono,monospace" opacity={isHovered?1:0.8} filter={e.tier==="xl"||isHovered?"url(#glow2)":"none"}>
+                          ${e.amount}B
+                        </text>
+                        {isHovered && (
+                          <text x={`${mx}%`} y={`${my}%`} textAnchor="middle" dy="6" fill="#fff" fontSize="8" fontFamily="JetBrains Mono,monospace" opacity="0.7"> {e.label} </text>
+                        )}
                       </g>
                     );
                   })}
-                </g>
-              </svg>
+                  {particles.current.map(p => {
+                    const f=NODES.find(n=>n.id===p.from), t=NODES.find(n=>n.id===p.to);
+                    return f&&t ? <Particle key={p.id} from={f} to={t} speed={p.speed} color={p.color} maxR={p.maxR} opacity={p.opacity}/> : null;
+                  })}
+                  {NODES.map(nd => {
+                    const pulse = Math.sin(tick*0.06+nd.x*8)*0.1+0.9;
+                    const inFlow = edges.filter(e=>e.to===nd.id).reduce((s,e)=>s+e.amount,0);
+                    const outFlow = edges.filter(e=>e.from===nd.id).reduce((s,e)=>s+e.amount,0);
+                    const netFlow = inFlow - outFlow;
+                    const netColor = netFlow > 0 ? C.green : netFlow < 0 ? C.red : nd.color;
+                    return (
+                      <g key={nd.id}>
+                        <circle cx={`${nd.x*100}%`} cy={`${nd.y*100}%`} r={nd.r*pulse*1.1} fill={nd.color} opacity="0.03"/>
+                        <circle cx={`${nd.x*100}%`} cy={`${nd.y*100}%`} r={nd.r*0.65} fill={nd.color} opacity="0.08" filter="url(#glow2)"/>
+                        <circle cx={`${nd.x*100}%`} cy={`${nd.y*100}%`} r={nd.r*0.42} fill={C.panel} stroke={nd.color} strokeWidth="1.8" strokeOpacity="0.8"/>
+                        <circle cx={`${nd.x*100}%`} cy={`${nd.y*100}%`} r={nd.r*0.5} fill="none" stroke={netColor} strokeWidth="2.5" strokeOpacity="0.35" strokeDasharray={`${Math.abs(netFlow)/10} 5`}/>
+                        <text x={`${nd.x*100}%`} y={`${nd.y*100}%`} textAnchor="middle" dy="-4" fill={nd.color} fontSize="10" fontWeight="700" fontFamily="JetBrains Mono,monospace">{nd.label}</text>
+                        <text x={`${nd.x*100}%`} y={`${nd.y*100}%`} textAnchor="middle" dy="6" fill={nd.color} fontSize="7.5" opacity="0.55" fontFamily="JetBrains Mono,monospace">{nd.en}</text>
+                        <text x={`${nd.x*100}%`} y={`${nd.y*100}%`} textAnchor="middle" dy="16" fill={netColor} fontSize="8" fontWeight="700" fontFamily="JetBrains Mono,monospace" opacity="0.85">
+                          {netFlow>0?`+${netFlow}B`:`${netFlow}B`}
+                        </text>
+                      </g>
+                    );
+                  })}
+                  <g transform="translate(8,8)">
+                    <rect x="0" y="0" width="115" height="86" rx="4" fill="#08101a" opacity="0.85"/>
+                    <text x="8" y="15" fill={C.muted} fontSize="8" fontFamily="JetBrains Mono,monospace" fontWeight="700">자금 규모 범례</text>
+                    {Object.entries(TIER_CFG).map(([tier,cfg],i)=>{
+                      const tc=TIER_COLORS[tier];
+                      const ranges={xl:">$300B",lg:"$150-300B",md:"$80-150B",sm:"<$80B"};
+                      return (
+                        <g key={tier} transform={`translate(8,${22+i*16})`}>
+                          <circle r={cfg.maxR*0.65} cx="6" cy="4" fill={tc} opacity="0.85"/>
+                          <line x1="14" y1="4" x2="30" y2="4" stroke={tc} strokeWidth={cfg.strokeW*0.7} opacity="0.7"/>
+                          <text x="34" y="8" fill={tc} fontSize="9" fontFamily="JetBrains Mono,monospace">{ranges[tier]}</text>
+                        </g>
+                      );
+                    })}
+                  </g>
+                </svg>
+              )}
+              {flowTab === "chart" && (
+                <div style={{height:520, padding:"16px", overflowY:"auto"}}>
+                  <div style={{fontSize:11, color:C.muted, fontFamily:"JetBrains Mono", marginBottom:12, fontWeight:700}}>
+                    월별 자금 흐름 추이 — 12개월 (단위: $B)
+                  </div>
+                  <div style={{display:"flex", flexDirection:"column", gap:14}}>
+                    {[...edges].sort((a,b)=>b.amount-a.amount).map(e=>{
+                      const f=NODES.find(n=>n.id===e.from), t=NODES.find(n=>n.id===e.to);
+                      const tc=TIER_COLORS[e.tier];
+                      const maxV=Math.max(...e.amounts);
+                      return (
+                        <div key={`${e.from}-${e.to}`} style={{background:"#080d18", borderRadius:6, padding:"10px 12px", border:`1px solid ${tc}33`}}>
+                          <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8}}>
+                            <span style={{fontSize:10, color:f?.color, fontFamily:"JetBrains Mono", fontWeight:700}}>{f?.label} → {t?.label}</span>
+                            <span style={{fontSize:9, color:C.muted}}>{e.label}</span>
+                          </div>
+                          <div style={{display:"flex", alignItems:"flex-end", gap:3, height:48}}>
+                            {e.amounts.map((v,i)=>{
+                              const barH = (v/maxV)*44;
+                              const isCurrent = i===monthIdx;
+                              return (
+                                <div key={i} style={{flex:1, display:"flex", flexDirection:"column", alignItems:"center", cursor:"pointer"}} onClick={()=>{setMonthIdx(i);setFlowTab("map");}}>
+                                  <div style={{ width:"100%", height:barH, background:isCurrent?tc:tc+"55", borderRadius:"2px 2px 0 0", transition:"height 0.3s", boxShadow:isCurrent?`0 0 8px ${tc}88`:"none", }}/>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div style={{display:"flex", justifyContent:"space-between", marginTop:3}}>
+                            {MONTHS.map((m,i)=>(
+                              <span key={i} style={{flex:1, fontSize:7.5, color:i===monthIdx?tc:C.muted, textAlign:"center"}}>{m.replace("월","")}</span>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div style={{width:210, borderLeft:`1px solid ${C.border}`, padding:"12px 10px", overflowY:"auto", background:"#080d18"}}>
@@ -330,14 +389,30 @@
                 const f=NODES.find(n=>n.id===e.from), t=NODES.find(n=>n.id===e.to);
                 const tc=TIER_COLORS[e.tier];
                 const pct=(e.amount/maxAmt)*100;
+                const prevAmt = e.amounts[(monthIdx+11)%12];
+                const delta = e.amount - prevAmt;
                 return (
-                  <div key={i} style={{marginBottom:12, padding:"8px", background:C.panel, borderRadius:6, border:`1px solid ${tc}33`}}>
-                    <div style={{display:"flex", justifyContent:"space-between", marginBottom:4}}>
-                      <span style={{fontSize:9, color:f?.color}}>{f?.label} → {t?.label}</span>
-                      <span style={{fontSize:9, color:tc, fontWeight:700}}>${e.amount}B</span>
+                  <div key={`${e.from}-${e.to}`} style={{marginBottom:8, padding:"7px 8px", background:C.panel, borderRadius:5, border:`1px solid ${tc}33`}}>
+                    <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4}}>
+                      <span style={{fontSize:9, color:f?.color, fontFamily:"JetBrains Mono", fontWeight:700, maxWidth:130, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
+                        {i+1}. {f?.label}→{t?.label}
+                      </span>
+                      <span style={{fontSize:8, color:tc, fontWeight:700}}>{TIER_CFG[e.tier].badge}</span>
                     </div>
-                    <div style={{height:3, background:C.bg, borderRadius:2, overflow:"hidden"}}>
-                      <div style={{width:`${pct}%`, height:"100%", background:tc, borderRadius:2}}/>
+                    <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4}}>
+                      <span style={{fontSize:13, fontWeight:700, color:tc, fontFamily:"JetBrains Mono"}}>${e.amount}B</span>
+                      <span style={{fontSize:9, color:delta>=0?C.green:C.red, fontFamily:"JetBrains Mono"}}>
+                        {delta>=0?"▲":"▼"}${Math.abs(delta)}B
+                      </span>
+                    </div>
+                    <div style={{height:3, background:C.border, borderRadius:2}}>
+                      <div style={{width:`${pct}%`, height:"100%", background:`linear-gradient(90deg,${f?.color}88,${tc})`, borderRadius:2}}/>
+                    </div>
+                    <div style={{marginTop:4}}>
+                      <Sparkline data={e.amounts} color={tc} width={186} height={22}/>
+                    </div>
+                    <div style={{fontSize:8, color:C.dim, fontFamily:"JetBrains Mono", marginTop:1}}>
+                      {e.label}
                     </div>
                   </div>
                 );
