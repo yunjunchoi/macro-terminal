@@ -52,30 +52,33 @@
       { id:"comm",   label:"원자재",        en:"Commodities",    x:0.18, y:0.36, r:36, color:"#ff7043" },
     ];
 
+    // w: 흐름 강도 0~1, amount: 월간 추정 자금이동 (십억달러), tier: "xl"/"lg"/"md"/"sm"
     const EDGES = [
-      { from:"bonds",  to:"us_eq",  w:0.8,  label:"금리인하 기대" },
-      { from:"asia",   to:"us_eq",  w:0.6,  label:"달러 강세" },
-      { from:"eu_eq",  to:"us_eq",  w:0.5,  label:"성장 격차" },
-      { from:"usd",    to:"crypto", w:0.7,  label:"리스크온" },
-      { from:"usd",    to:"us_eq",  w:0.6,  label:"AI 붐" },
-      { from:"bonds",  to:"usd",    w:0.4,  label:"안전자산" },
-      { from:"asia",   to:"gold",   w:0.5,  label:"지정학 헤지" },
-      { from:"usd",    to:"gold",   w:0.3,  label:"인플레 헤지" },
-      { from:"eu_eq",  to:"bonds",  w:0.4,  label:"ECB 완화" },
-      { from:"kr_eq",  to:"usd",    w:0.35, label:"외국인 순매도" },
-      { from:"comm",   to:"asia",   w:0.3,  label:"원자재 수요" },
-      { from:"crypto", to:"us_eq",  w:0.45, label:"기관 순환" },
+      { from:"bonds",  to:"us_eq",  w:0.80, amount:420, tier:"xl", label:"금리인하 기대" },
+      { from:"usd",    to:"crypto", w:0.70, amount:310, tier:"xl", label:"리스크온" },
+      { from:"asia",   to:"us_eq",  w:0.60, amount:280, tier:"lg", label:"달러 강세" },
+      { from:"usd",    to:"us_eq",  w:0.60, amount:260, tier:"lg", label:"AI 붐" },
+      { from:"eu_eq",  to:"us_eq",  w:0.50, amount:195, tier:"lg", label:"성장 격차" },
+      { from:"asia",   to:"gold",   w:0.50, amount:180, tier:"lg", label:"지정학 헤지" },
+      { from:"eu_eq",  to:"bonds",  w:0.40, amount:140, tier:"md", label:"ECB 완화" },
+      { from:"bonds",  to:"usd",    w:0.40, amount:130, tier:"md", label:"안전자산" },
+      { from:"crypto", to:"us_eq",  w:0.45, amount:120, tier:"md", label:"기관 순환" },
+      { from:"kr_eq",  to:"usd",    w:0.35, amount: 85, tier:"sm", label:"외국인 순매도" },
+      { from:"usd",    to:"gold",   w:0.30, amount: 75, tier:"sm", label:"인플레 헤지" },
+      { from:"comm",   to:"asia",   w:0.30, amount: 60, tier:"sm", label:"원자재 수요" },
     ];
+
+    const TIER_CONFIG = {
+      xl: { strokeW:4.5, particleR:7,   particleCount:12, opacity:0.9,  badge:"🔴 대규모" },
+      lg: { strokeW:3.0, particleR:5,   particleCount: 9, opacity:0.75, badge:"🟠 중대규모" },
+      md: { strokeW:1.8, particleR:3.5, particleCount:6,  opacity:0.6,  badge:"🟡 중규모" },
+      sm: { strokeW:1.0, particleR:2,   particleCount:4,  opacity:0.45, badge:"🟢 소규모" },
+    };
 
     // ── JARVIS INSIGHT (2026-02-28) ─────────────────────────────
     const JARVIS_INSIGHT = {
       date: "2026-02-28",
-      macro: {
-        vix: 14.5,
-        fearGreed: 42,
-        us10y: 4.25,
-        usdkrw: 1325
-      },
+      macro: { vix: 14.5, fearGreed: 42, us10y: 4.25, usdkrw: 1325 },
       summary: "시장 공포(VIX)는 낮으나 심리(CNN)는 Neutral 상태입니다. 환율 안정화로 코스피 반등 가능성이 높습니다.",
       strategy: "KOSPI/금 비중 유지. 비트코인 67k 돌파 시 현금 비중 10% 추가 투입 권고."
     };
@@ -101,7 +104,7 @@
     }
 
     // ── 자금 흐름 파티클 ─────────────────────────────────────────
-    function Particle({ from, to, speed, color }) {
+    function Particle({ from, to, speed, color, maxR, opacity }) {
       const prog = useRef(Math.random());
       const [p, setP] = useState(prog.current);
       useEffect(() => {
@@ -116,11 +119,12 @@
       }, [speed]);
       const x = from.x + (to.x - from.x) * p;
       const y = from.y + (to.y - from.y) * p;
+      const r = (maxR || 4) * (0.5 + (1 - Math.abs(p - 0.5) * 2) * 0.5);
       return (
         <circle
           cx={`${x * 100}%`} cy={`${y * 100}%`}
-          r={3 + (1 - Math.abs(p - 0.5) * 2) * 3}
-          fill={color} opacity={0.55 + p * 0.45}
+          r={r}
+          fill={color} opacity={(opacity || 0.6) * (0.5 + p * 0.5)}
         />
       );
     }
@@ -130,28 +134,55 @@
       useEffect(() => { const iv = setInterval(() => setTick(t => t + 1), 60); return () => clearInterval(iv); }, []);
 
       const particles = useRef(
-        EDGES.flatMap(e => Array.from({ length: Math.floor(e.w * 8) }, (_, i) => ({
-          id: `${e.from}${e.to}${i}`, from: e.from, to: e.to,
-          speed: 0.07 + Math.random() * 0.12,
-          color: NODES.find(n => n.id === e.from)?.color || "#fff",
-        })))
+        EDGES.flatMap(e => {
+          const cfg = TIER_CONFIG[e.tier] || TIER_CONFIG.sm;
+          return Array.from({ length: cfg.particleCount }, (_, i) => ({
+            id: `${e.from}${e.to}${i}`, from: e.from, to: e.to,
+            speed: 0.06 + Math.random() * 0.10,
+            color: NODES.find(n => n.id === e.from)?.color || "#fff",
+            maxR: cfg.particleR,
+            opacity: cfg.opacity,
+          }));
+        })
       );
 
+      const tierColors = { xl:"#ff1744", lg:"#ff9800", md:"#f0b429", sm:"#00e676" };
+
       if (tab === "info") return (
-        <div style={{ padding:10, display:"flex", flexWrap:"wrap", gap:6, overflowY:"auto", maxHeight:300 }}>
-          {EDGES.map(e => {
-            const f = NODES.find(n => n.id === e.from);
-            const t = NODES.find(n => n.id === e.to);
-            return (
-              <div key={e.from + e.to} style={{ padding:"6px 10px", background:C.bg, borderRadius:4, border:`1px solid ${f?.color}44`, minWidth:170, flex:"1 1 170px" }}>
-                <div style={{ fontSize:10, color:f?.color, fontWeight:700, marginBottom:2 }}>{f?.label} → {t?.label}</div>
-                <div style={{ fontSize:9, color:C.muted }}>{e.label}</div>
-                <div style={{ marginTop:4, height:3, background:C.border, borderRadius:2 }}>
-                  <div style={{ width:`${e.w * 100}%`, height:"100%", background:f?.color, borderRadius:2 }} />
+        <div style={{ padding:10, display:"flex", flexDirection:"column", gap:6, overflowY:"auto", maxHeight:380 }}>
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap", padding:"8px 10px", background:C.bg, borderRadius:6, border:`1px solid ${C.border}`, marginBottom:4 }}>
+            <span style={{ fontSize:9, color:C.muted, fontWeight:700, marginRight:4 }}>규모 기준:</span>
+            {Object.entries(TIER_CONFIG).map(([tier, cfg]) => (
+              <span key={tier} style={{ fontSize:9, color:tierColors[tier], display:"flex", alignItems:"center", gap:4 }}>
+                <span style={{ width: tier==="xl"?14:tier==="lg"?10:tier==="md"?7:5, height: tier==="xl"?14:tier==="lg"?10:tier==="md"?7:5, borderRadius:"50%", background:tierColors[tier], display:"inline-block" }} />
+                {cfg.badge}
+              </span>
+            ))}
+          </div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {[...EDGES].sort((a,b) => b.amount - a.amount).map(e => {
+              const f = NODES.find(n => n.id === e.from);
+              const t = NODES.find(n => n.id === e.to);
+              const cfg = TIER_CONFIG[e.tier];
+              const tc = tierColors[e.tier];
+              return (
+                <div key={e.from + e.to} style={{ padding:"8px 12px", background:C.bg, borderRadius:6, border:`2px solid ${tc}55`, minWidth:185, flex:"1 1 185px" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                    <span style={{ fontSize:10, color:f?.color, fontWeight:700 }}>{f?.label} → {t?.label}</span>
+                    <span style={{ fontSize:8, color:tc, background:tc+"22", padding:"1px 6px", borderRadius:3, fontWeight:700 }}>{cfg.badge}</span>
+                  </div>
+                  <div style={{ fontSize:9, color:C.muted, marginBottom:6 }}>{e.label}</div>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                    <span style={{ fontSize:14, fontWeight:700, color:tc, fontFamily:"JetBrains Mono" }}> ${e.amount}B </span>
+                    <span style={{ fontSize:8, color:C.muted }}>월간 추정 이동</span>
+                  </div>
+                  <div style={{ height:5, background:C.border, borderRadius:3 }}>
+                    <div style={{ width:`${(e.amount/420)*100}%`, height:"100%", background:`linear-gradient(90deg, ${f?.color}88, ${tc})`, borderRadius:3, transition:"width 0.3s" }} />
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       );
 
@@ -162,22 +193,44 @@
               <feGaussianBlur stdDeviation="3" result="b" />
               <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
             </filter>
+            <filter id="glow-strong">
+              <feGaussianBlur stdDeviation="5" result="b" />
+              <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
           </defs>
+          <g transform="translate(8, 8)">
+            {Object.entries(TIER_CONFIG).map(([tier, cfg], i) => (
+              <g key={tier} transform={`translate(0, ${i * 18})`}>
+                <circle r={cfg.particleR * 0.7} cx="7" cy="7" fill={tierColors[tier]} opacity={cfg.opacity} />
+                <line x1="14" y1="7" x2="32" y2="7" stroke={tierColors[tier]} strokeWidth={cfg.strokeW * 0.7} opacity="0.7" />
+                <text x="36" y="11" fill={tierColors[tier]} fontSize="9" fontFamily="JetBrains Mono,monospace" opacity="0.85">
+                  {tier === "xl" ? "> $300B" : tier === "lg" ? "$150~300B" : tier === "md" ? "$80~150B" : "< $80B"}
+                </text>
+              </g>
+            ))}
+          </g>
           {EDGES.map(e => {
             const f = NODES.find(n => n.id === e.from), t = NODES.find(n => n.id === e.to);
             if (!f || !t) return null;
+            const cfg = TIER_CONFIG[e.tier];
             const x1=f.x*100, y1=f.y*100, x2=t.x*100, y2=t.y*100;
+            const mx=(x1+x2)/2+(y2-y1)*0.15, my=(y1+y2)/2-(x2-x1)*0.15;
+            const d = `M${x1}% ${y1}% Q${mx}% ${my}% ${x2}% ${y2}%`;
             return (
-              <path key={e.from+e.to}
-                d={`M${x1}% ${y1}% Q${(x1+x2)/2+(y2-y1)*0.15}% ${(y1+y2)/2-(x2-x1)*0.15}% ${x2}% ${y2}%`}
-                stroke={f.color} strokeWidth="1" strokeOpacity={0.12+e.w*0.1}
-                fill="none" strokeDasharray="4 8"
-              />
+              <g key={e.from+e.to}>
+                {(e.tier==="xl"||e.tier==="lg") && (
+                  <path d={d} stroke={tierColors[e.tier]} strokeWidth={cfg.strokeW * 2.5} strokeOpacity={0.08} fill="none" filter="url(#glow)" />
+                )}
+                <path d={d} stroke={f.color} strokeWidth={cfg.strokeW} strokeOpacity={0.25 + e.w * 0.35} fill="none" strokeDasharray={e.tier==="xl"?"none":e.tier==="lg"?"8 4":"5 6"} />
+                <text x={`${mx}%`} y={`${my}%`} textAnchor="middle" dy="-5" fill={tierColors[e.tier]} fontSize={e.tier==="xl"?11:e.tier==="lg"?10:9} fontWeight="700" fontFamily="JetBrains Mono,monospace" opacity="0.9" filter={e.tier==="xl"?"url(#glow)":"none"}>
+                  ${e.amount}B
+                </text>
+              </g>
             );
           })}
           {particles.current.map(p => {
             const f = NODES.find(n => n.id === p.from), t = NODES.find(n => n.id === p.to);
-            return f && t ? <Particle key={p.id} from={f} to={t} speed={p.speed} color={p.color} /> : null;
+            return f && t ? <Particle key={p.id} from={f} to={t} speed={p.speed} color={p.color} maxR={p.maxR} opacity={p.opacity} /> : null;
           })}
           {NODES.map(nd => {
             const pulse = Math.sin(tick * 0.06 + nd.x * 10) * 0.12 + 0.88;
@@ -377,7 +430,7 @@
             {/* ── 섹터 히트맵 + 자금흐름 ── */}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
               <Box title="S&P 500 섹터 히트맵" badge={<span style={{ fontSize:9, color:C.green }}>● LIVE</span>}>
-                <TV type="stock-heatmap" height={310} opts={{
+                <TV type="stock-heatmap" height={390} opts={{
                   exchanges:[], dataSource:"SPX500", grouping:"sector",
                   blockSize:"market_cap_basic", blockColor:"change",
                   hasTopBar:false, isDataSetEnabled:false, isZoomEnabled:true, hasSymbolTooltip:true,
@@ -395,7 +448,7 @@
                     ))}
                   </div>
                 }>
-                <div style={{ height:310, position:"relative" }}><FlowMap tab={flowTab} /></div>
+                <div style={{ height:390, position:"relative" }}><FlowMap tab={flowTab} /></div>
               </Box>
             </div>
 
