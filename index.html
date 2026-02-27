@@ -38,17 +38,11 @@
 
     const MONTHS = ["1월","2월","3월","4월","5월","6월","7월","8월","9월","10월","11월","12월"];
 
-    // ─────────────────────────────────────────────
-    // 월별 자금 흐름 데이터 (계절성 반영)
-    // 연초 채권→주식 로테이션, 여름 리스크오프, Q4 연말 랠리 등
-    // ─────────────────────────────────────────────
     const EDGES_MONTHLY = [
       { from:"bonds",  to:"us_eq",  label:"금리인하 기대", tier:"xl",
-        // 연초·연말 강함, 여름 약함
         amounts:[460,440,400,370,320,280,260,290,340,390,430,480],
       },
       { from:"usd",    to:"crypto", label:"리스크온", tier:"xl",
-        // Q1·Q4 강세, 여름 약세
         amounts:[350,380,420,390,340,280,230,260,310,360,400,440],
       },
       { from:"asia",   to:"us_eq",  label:"달러 강세", tier:"lg",
@@ -61,7 +55,6 @@
         amounts:[200,195,185,175,165,150,140,155,170,185,195,205],
       },
       { from:"asia",   to:"gold",   label:"지정학 헤지", tier:"lg",
-        // 긴장 고조 시 증가 (봄·가을)
         amounts:[160,170,190,210,200,185,175,180,200,220,195,170],
       },
       { from:"eu_eq",  to:"bonds",  label:"ECB 완화", tier:"md",
@@ -115,7 +108,6 @@
       { name:"BOK",     value:2.75, prev:3.00, term:"Policy" },
     ];
 
-    // ── JARVIS INSIGHT (2026-02-28) ─────────────────────────────
     const JARVIS_INSIGHT = {
       date: "2026-02-28",
       macro: { vix: 14.5, fearGreed: 42, us10y: 4.25, usdkrw: 1325 },
@@ -123,7 +115,6 @@
       strategy: "KOSPI/금 비중 유지. 비트코인 67k 돌파 시 현금 비중 10% 추가 투입 권고."
     };
 
-    // ── TradingView 위젯 ─────────────────────────────────────────
     function TV({ type, opts, height }) {
       const ref = useRef(null);
       const uid = useRef("tv_" + Math.random().toString(36).slice(2));
@@ -143,7 +134,6 @@
       return <div ref={ref} style={{width:"100%",height,overflow:"hidden"}} />;
     }
 
-    // ── 자금 흐름 파티클 ─────────────────────────────────────────
     function Particle({ from, to, speed, color, maxR, opacity }) {
       const prog = useRef(Math.random());
       const [p, setP] = useState(prog.current);
@@ -163,33 +153,6 @@
       return <circle cx={`${x*100}%`} cy={`${y*100}%`} r={r} fill={color} opacity={(opacity||0.65)*(0.4+p*0.6)} />;
     }
 
-    // ── 미니 스파크라인 (SVG) ─────────────────────────────────────────
-    function Sparkline({ data, color, width=80, height=28 }) {
-      if (!data || data.length < 2) return null;
-      const min = Math.min(...data), max = Math.max(...data);
-      const range = max - min || 1;
-      const pts = data.map((v,i) => {
-        const x = (i / (data.length-1)) * width;
-        const y = height - ((v - min) / range) * (height - 4) - 2;
-        return `${x},${y}`;
-      }).join(" ");
-      const last = data[data.length-1], first = data[0];
-      const up = last >= first;
-      const lineColor = up ? "#00e676" : "#ff1744";
-      return (
-        <svg width={width} height={height} style={{display:"block"}}>
-          <defs>
-            <linearGradient id={`sg_${color}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={lineColor} stopOpacity="0.3"/>
-              <stop offset="100%" stopColor={lineColor} stopOpacity="0"/>
-            </linearGradient>
-          </defs>
-          <polyline points={pts} fill="none" stroke={lineColor} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
-        </svg>
-      );
-    }
-
-    // ── 자금 흐름 히어로 컴포넌트 ─────────────────────────────────────────
     function CapitalFlowHero() {
       const [monthIdx, setMonthIdx] = useState(new Date().getMonth());
       const [playing, setPlaying] = useState(false);
@@ -233,9 +196,10 @@
             opacity: 0.5 + e.w * 0.45,
           }));
         });
-      }, [monthIdx, speed]);
+      }, [monthIdx, speed, edges]);
 
       const totalFlow = edges.reduce((s,e)=>s+e.amount, 0);
+      const maxAmt = Math.max(...edges.map(e=>e.amount));
 
       return (
         <div style={{background:C.panel, border:`1px solid ${C.border}`, borderRadius:8, overflow:"hidden"}}>
@@ -285,8 +249,8 @@
             </div>
           </div>
 
-          <div style={{height:520, position:"relative"}}>
-            {flowTab === "map" && (
+          <div style={{display:"flex", height:520}}>
+            <div style={{flex:1, position:"relative"}}>
               <svg width="100%" height="100%" style={{display:"block"}}>
                 <defs>
                   <filter id="glow2"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
@@ -305,56 +269,94 @@
                   return (
                     <g key={`${e.from}-${e.to}`} onMouseEnter={()=>setHoveredEdge(`${e.from}-${e.to}`)} onMouseLeave={()=>setHoveredEdge(null)} style={{cursor:"pointer"}}>
                       {e.tier==="xl" && <path d={d} stroke={tc} strokeWidth={sw*3} strokeOpacity={0.07} fill="none" filter="url(#glow-xl)"/>}
+                      {e.tier==="lg" && <path d={d} stroke={tc} strokeWidth={sw*2} strokeOpacity={0.06} fill="none" filter="url(#glow2)"/>}
                       <path d={d} stroke={isHovered?tc:f.color} strokeWidth={sw} strokeOpacity={isHovered?0.95:0.3+e.w*0.45} fill="none" strokeDasharray={e.tier==="xl"?"none":e.tier==="lg"?"10 4":"6 6"}/>
-                      <text x={`${mx}%`} y={`${my}%`} textAnchor="middle" dy="-7" fill={tc} fontSize={cfg.labelSize} fontWeight="700" fontFamily="JetBrains Mono,monospace" opacity={isHovered?1:0.8}>
+                      <text x={`${mx}%`} y={`${my}%`} textAnchor="middle" dy="-7" fill={tc} fontSize={cfg.labelSize} fontWeight="700" fontFamily="JetBrains Mono,monospace" opacity={isHovered?1:0.8} filter={e.tier==="xl"||isHovered?"url(#glow2)":"none"}>
                         ${e.amount}B
                       </text>
+                      {isHovered && (
+                        <text x={`${mx}%`} y={`${my}%`} textAnchor="middle" dy="6" fill="#fff" fontSize="8" fontFamily="JetBrains Mono,monospace" opacity="0.7"> {e.label} </text>
+                      )}
                     </g>
                   );
                 })}
                 {particles.current.map(p => {
-                  const f = NODES.find(n=>n.id===p.from), t = NODES.find(n=>n.id===p.to);
-                  return f && t ? <Particle key={p.id} from={f} to={t} speed={p.speed} color={p.color} maxR={p.maxR} opacity={p.opacity} /> : null;
+                  const f=NODES.find(n=>n.id===p.from), t=NODES.find(n=>n.id===p.to);
+                  return f&&t ? <Particle key={p.id} from={f} to={t} speed={p.speed} color={p.color} maxR={p.maxR} opacity={p.opacity}/> : null;
                 })}
                 {NODES.map(nd => {
-                  const pulse = Math.sin(tick * 0.06 + nd.x * 10) * 0.12 + 0.88;
+                  const pulse = Math.sin(tick*0.06+nd.x*8)*0.1+0.9;
+                  const inFlow = edges.filter(e=>e.to===nd.id).reduce((s,e)=>s+e.amount,0);
+                  const outFlow = edges.filter(e=>e.from===nd.id).reduce((s,e)=>s+e.amount,0);
+                  const netFlow = inFlow - outFlow;
+                  const netColor = netFlow > 0 ? C.green : netFlow < 0 ? C.red : nd.color;
                   return (
                     <g key={nd.id}>
-                      <circle cx={`${nd.x*100}%`} cy={`${nd.y*100}%`} r={nd.r*pulse*0.9} fill={nd.color} opacity="0.04" />
-                      <circle cx={`${nd.x*100}%`} cy={`${nd.y*100}%`} r={nd.r*0.38} fill={C.panel} stroke={nd.color} strokeWidth="1.5" strokeOpacity="0.75" />
+                      <circle cx={`${nd.x*100}%`} cy={`${nd.y*100}%`} r={nd.r*pulse*1.1} fill={nd.color} opacity="0.03"/>
+                      <circle cx={`${nd.x*100}%`} cy={`${nd.y*100}%`} r={nd.r*0.65} fill={nd.color} opacity="0.08" filter="url(#glow2)"/>
+                      <circle cx={`${nd.x*100}%`} cy={`${nd.y*100}%`} r={nd.r*0.42} fill={C.panel} stroke={nd.color} strokeWidth="1.8" strokeOpacity="0.8"/>
+                      <circle cx={`${nd.x*100}%`} cy={`${nd.y*100}%`} r={nd.r*0.5} fill="none" stroke={netColor} strokeWidth="2.5" strokeOpacity="0.35" strokeDasharray={`${Math.abs(netFlow)/10} 5`}/>
                       <text x={`${nd.x*100}%`} y={`${nd.y*100}%`} textAnchor="middle" dy="-4" fill={nd.color} fontSize="10" fontWeight="700" fontFamily="JetBrains Mono,monospace">{nd.label}</text>
-                      <text x={`${nd.x*100}%`} y={`${nd.y*100}%`} textAnchor="middle" dy="9" fill={nd.color} fontSize="8" opacity="0.6" fontFamily="JetBrains Mono,monospace">{nd.en}</text>
+                      <text x={`${nd.x*100}%`} y={`${nd.y*100}%`} textAnchor="middle" dy="6" fill={nd.color} fontSize="7.5" opacity="0.55" fontFamily="JetBrains Mono,monospace">{nd.en}</text>
+                      <text x={`${nd.x*100}%`} y={`${nd.y*100}%`} textAnchor="middle" dy="16" fill={netColor} fontSize="8" fontWeight="700" fontFamily="JetBrains Mono,monospace" opacity="0.85">
+                        {netFlow>0?`+${netFlow}B`:`${netFlow}B`}
+                      </text>
                     </g>
                   );
                 })}
+                <g transform="translate(8,8)">
+                  <rect x="0" y="0" width="115" height="86" rx="4" fill="#08101a" opacity="0.85"/>
+                  <text x="8" y="15" fill={C.muted} fontSize="8" fontFamily="JetBrains Mono,monospace" fontWeight="700">자금 규모 범례</text>
+                  {Object.entries(TIER_CFG).map(([tier,cfg],i)=>{
+                    const tc=TIER_COLORS[tier];
+                    const ranges={xl:">$300B",lg:"$150-300B",md:"$80-150B",sm:"<$80B"};
+                    return (
+                      <g key={tier} transform={`translate(8,${22+i*16})`}>
+                        <circle r={cfg.maxR*0.65} cx="6" cy="4" fill={tc} opacity="0.85"/>
+                        <line x1="14" y1="4" x2="30" y2="4" stroke={tc} strokeWidth={cfg.strokeW*0.7} opacity="0.7"/>
+                        <text x="34" y="8" fill={tc} fontSize="9" fontFamily="JetBrains Mono,monospace">{ranges[tier]}</text>
+                      </g>
+                    );
+                  })}
+                </g>
               </svg>
-            )}
+            </div>
+
+            <div style={{width:210, borderLeft:`1px solid ${C.border}`, padding:"12px 10px", overflowY:"auto", background:"#080d18"}}>
+              <div style={{fontSize:10, color:C.muted, fontFamily:"JetBrains Mono", marginBottom:10, fontWeight:700, letterSpacing:"0.1em"}}>
+                TOP FLOWS · {MONTHS[monthIdx]}
+              </div>
+              {[...edges].sort((a,b)=>b.amount-a.amount).map((e,i)=>{
+                const f=NODES.find(n=>n.id===e.from), t=NODES.find(n=>n.id===e.to);
+                const tc=TIER_COLORS[e.tier];
+                const pct=(e.amount/maxAmt)*100;
+                return (
+                  <div key={i} style={{marginBottom:12, padding:"8px", background:C.panel, borderRadius:6, border:`1px solid ${tc}33`}}>
+                    <div style={{display:"flex", justifyContent:"space-between", marginBottom:4}}>
+                      <span style={{fontSize:9, color:f?.color}}>{f?.label} → {t?.label}</span>
+                      <span style={{fontSize:9, color:tc, fontWeight:700}}>${e.amount}B</span>
+                    </div>
+                    <div style={{height:3, background:C.bg, borderRadius:2, overflow:"hidden"}}>
+                      <div style={{width:`${pct}%`, height:"100%", background:tc, borderRadius:2}}/>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       );
     }
 
-    // ── 암호화폐 (CoinGecko 실시간) ──────────────────────────────
     function CryptoLive() {
-      const [data, setData] = useState([
-        {n:"BTC",p:85420,c:2.3},{n:"ETH",p:2180,c:1.8},
-        {n:"USDT",p:1.0,c:0.0},{n:"XRP",p:2.18,c:-1.2},{n:"SOL",p:142.5,c:3.1},
-      ]);
-      const [live, setLive] = useState(false);
+      const [data, setData] = useState([{n:"BTC",p:85420,c:2.3},{n:"ETH",p:2180,c:1.8},{n:"USDT",p:1.0,c:0.0},{n:"XRP",p:2.18,c:-1.2},{n:"SOL",p:142.5,c:3.1}]);
       useEffect(() => {
         const go = async () => {
           try {
             const r = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,tether,ripple,solana&vs_currencies=usd&include_24hr_change=true");
             if (!r.ok) return;
             const d = await r.json();
-            setData([
-              {n:"BTC",  p:d.bitcoin?.usd,  c:d.bitcoin?.usd_24h_change},
-              {n:"ETH",  p:d.ethereum?.usd, c:d.ethereum?.usd_24h_change},
-              {n:"USDT", p:d.tether?.usd,   c:d.tether?.usd_24h_change},
-              {n:"XRP",  p:d.ripple?.usd,   c:d.ripple?.usd_24h_change},
-              {n:"SOL",  p:d.solana?.usd,   c:d.solana?.usd_24h_change},
-            ]);
-            setLive(true);
+            setData([{n:"BTC", p:d.bitcoin?.usd, c:d.bitcoin?.usd_24h_change},{n:"ETH", p:d.ethereum?.usd, c:d.ethereum?.usd_24h_change},{n:"USDT", p:d.tether?.usd, c:d.tether?.usd_24h_change},{n:"XRP", p:d.ripple?.usd, c:d.ripple?.usd_24h_change},{n:"SOL", p:d.solana?.usd, c:d.solana?.usd_24h_change}]);
           } catch {}
         };
         go(); const iv = setInterval(go, 30000); return () => clearInterval(iv);
@@ -364,9 +366,7 @@
           {data.map(x => (
             <div key={x.n} style={{ display:"flex", justifyContent:"space-between", padding:"5px 8px", background:C.bg, borderRadius:4, border:`1px solid ${C.border}` }}>
               <span style={{ color:C.gold, fontFamily:"JetBrains Mono", fontSize:10, fontWeight:700 }}>{x.n}</span>
-              <span style={{ color:C.text, fontFamily:"JetBrains Mono", fontSize:10 }}>
-                ${x.p < 10 ? x.p?.toFixed(4) : x.p?.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}
-              </span>
+              <span style={{ color:C.text, fontFamily:"JetBrains Mono", fontSize:10 }}>${x.p < 10 ? x.p?.toFixed(4) : x.p?.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
               <span style={{ color:x.c>=0?C.green:C.red, fontSize:9 }}>{x.c>=0?"▲":"▼"}{Math.abs(x.c||0).toFixed(2)}%</span>
             </div>
           ))}
@@ -374,10 +374,8 @@
       );
     }
 
-    // ── 환율 (ExchangeRate-API 실시간) ──────────────────────────
     function FXLive() {
       const [r, setR] = useState({KRW:1368.5,JPY:149.2,EUR:0.918,GBP:0.782,CNY:7.24,MXN:17.85});
-      const [live, setLive] = useState(false);
       useEffect(() => {
         const go = async () => {
           try {
@@ -385,15 +383,11 @@
             if (!res.ok) return;
             const d = await res.json();
             setR({KRW:d.rates.KRW,JPY:d.rates.JPY,EUR:d.rates.EUR,GBP:d.rates.GBP,CNY:d.rates.CNY,MXN:d.rates.MXN});
-            setLive(true);
           } catch {}
         };
         go(); const iv = setInterval(go, 60000); return () => clearInterval(iv);
       }, []);
-      const pairs = [
-        {p:"USD/KRW",v:r.KRW,f:"🇺🇸🇰🇷"},{p:"USD/JPY",v:r.JPY,f:"🇺🇸🇯🇵"},
-        {p:"EUR/USD",v:(1/r.EUR).toFixed(4),f:"🇪🇺🇺🇸"},{p:"GBP/USD",v:(1/r.GBP).toFixed(4),f:"🇬🇧🇺🇸"},
-      ];
+      const pairs = [{p:"USD/KRW",v:r.KRW,f:"🇺🇸🇰🇷"},{p:"USD/JPY",v:r.JPY,f:"🇺🇸🇯🇵"},{p:"EUR/USD",v:(1/r.EUR).toFixed(4),f:"🇪🇺🇺🇸"},{p:"GBP/USD",v:(1/r.GBP).toFixed(4),f:"🇬🇧🇺🇸"}];
       return (
         <div style={{ padding:"8px 10px", display:"flex", flexDirection:"column", gap:5 }}>
           {pairs.map(x => (
