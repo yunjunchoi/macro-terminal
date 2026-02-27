@@ -196,7 +196,7 @@
       const maxAmt = Math.max(...edges.map(e=>e.amount));
 
       return (
-        <div style={{background:C.panel, border:`1px solid ${C.border}`, borderRadius:8, overflow:"hidden"}}>
+        <div style={{background:C.panel, border:`1px solid ${C.border}`, borderRadius:8, overflow:"hidden", marginBottom: 12}}>
           <div style={{padding:"10px 16px", borderBottom:`1px solid ${C.border}`, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
             <div style={{display:"flex", alignItems:"center", gap:12}}>
               <div style={{width:3, height:20, background:C.accent, borderRadius:2}}/>
@@ -603,33 +603,110 @@
           <div style={{ padding:"10px 12px", display:"flex", flexDirection:"column", gap:10 }}>
             <CapitalFlowHero />
 
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
-              <Box title="FX & Trends"><FXWithSparkline /></Box>
-              <Box title="Market Insight">
-                <div style={{padding:"12px", fontSize:11, lineHeight:1.6}}>
-                  <div style={{color:C.accent, fontWeight:700, marginBottom:8}}>🤖 Jarvis Insight ({JARVIS_INSIGHT.date})</div>
-                  <div style={{color:C.text}}>{JARVIS_INSIGHT.summary}</div>
-                  <div style={{marginTop:10, color:C.gold, fontSize:10}}>{JARVIS_INSIGHT.strategy}</div>
-                </div>
-              </Box>
-              <Box title="Crypto & Status" badge={<span style={{fontSize:9, color:C.green}}>ONLINE</span>}>
-                 <CryptoLive />
-                 <div style={{padding:"8px 12px", borderTop:`1px solid ${C.border}`, marginTop:5}}>
-                    <div style={{fontSize:9, color:C.muted}}>분석 엔진: <span style={{color:C.accent}}>Jarvis Core 3.1</span></div>
-                    <div style={{fontSize:9, color:C.muted}}>데이터: <span style={{color:C.text}}>Sim v2.5</span></div>
-                 </div>
-              </Box>
-            </div>
-
             <Box title="글로벌 증시 · Global Indices" badge={<span style={{fontSize:9,color:C.green}}>● TRADINGVIEW REAL-TIME</span>}>
               <TV type="market-overview" height={220} opts={{
                 dateRange:"1D", showChart:true,
+                plotLineColorGrowing:"rgba(0,212,255,1)", plotLineColorFalling:"rgba(255,23,68,1)",
+                gridLineColor:"rgba(28,35,51,1)", scaleFontColor:"rgba(90,106,122,1)",
+                belowLineFillColorGrowing:"rgba(0,212,255,0.12)", belowLineFillColorFalling:"rgba(255,23,68,0.12)",
+                showFloatingTooltip:true, showSymbolLogo:true,
                 tabs:[
-                  {title:"주요 지수",symbols:[{s:"FOREXCOM:SPXUSD",d:"S&P 500"},{s:"FOREXCOM:NSXUSD",d:"NASDAQ 100"},{s:"DJ:DJI",d:"DOW JONES"},{s:"KRX:KOSPI",d:"KOSPI"},{s:"INDEX:NKY",d:"NIKKEI 225"},{s:"INDEX:DEU40",d:"DAX"}]},
-                  {title:"아시아",symbols:[{s:"KRX:KOSPI",d:"KOSPI"},{s:"INDEX:NKY",d:"NIKKEI"},{s:"INDEX:HSI",d:"항셍"},{s:"SSE:000001",d:"상하이"}]}
+                  {title:"주요 지수",symbols:[{s:"FOREXCOM:SPXUSD",d:"S&P 500"},{s:"FOREXCOM:NSXUSD",d:"NASDAQ 100"},{s:"DJ:DJI",d:"DOW JONES"},{s:"KRX:KOSPI",d:"KOSPI"},{s:"INDEX:NKY",d:"NIKKEI 225"},{s:"INDEX:DEU40",d:"DAX"},{s:"INDEX:HSI",d:"항셍"},{s:"SSE:000001",d:"상하이"}]},
+                  {title:"아시아",symbols:[{s:"KRX:KOSPI",d:"KOSPI"},{s:"INDEX:NKY",d:"NIKKEI"},{s:"INDEX:HSI",d:"항셍"},{s:"SSE:000001",d:"상하이"},{s:"NSE:NIFTY50",d:"NIFTY 50"},{s:"ASX:XJO",d:"ASX 200"}]},
+                  {title:"유럽",symbols:[{s:"INDEX:DEU40",d:"DAX"},{s:"INDEX:UKX",d:"FTSE 100"},{s:"INDEX:CAC40",d:"CAC 40"},{s:"INDEX:SMI",d:"SMI"}]},
+                  {title:"미주",symbols:[{s:"FOREXCOM:SPXUSD",d:"S&P 500"},{s:"FOREXCOM:NSXUSD",d:"NASDAQ"},{s:"DJ:DJI",d:"DOW"},{s:"BMFBOVESPA:IBOV",d:"BOVESPA"}]}
                 ]
               }} />
             </Box>
+
+            <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10}}>
+              <Box title="S&P 500 섹터 히트맵" badge={<span style={{fontSize:9,color:C.green}}>● LIVE</span>}>
+                <TV type="stock-heatmap" height={300} opts={{
+                  exchanges:[],dataSource:"SPX500",grouping:"sector",
+                  blockSize:"market_cap_basic",blockColor:"change",
+                  hasTopBar:false,isDataSetEnabled:false,isZoomEnabled:true,hasSymbolTooltip:true,
+                }}/>
+              </Box>
+              <Box title="암호화폐 마켓 · Crypto Market" badge={<span style={{fontSize:9,color:C.green}}>● TRADINGVIEW LIVE</span>}>
+                <TV type="screener" height={300} opts={{
+                  defaultScreen:"crypto",market:"crypto",showToolbar:false,
+                }}/>
+              </Box>
+            </div>
+
+            <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10}}>
+              <Box title="환율 크로스 · FX Cross Rates" badge={<span style={{fontSize:9,color:C.green}}>● TRADINGVIEW LIVE</span>}>
+                <TV type="forex-cross-rates" height={260} opts={{
+                  currencies:["USD","KRW","EUR","JPY","GBP","CNY","AUD","CAD","MXN"],
+                }}/>
+              </Box>
+              <Box title="환율 추이 · FX with Trend" badge={<span style={{fontSize:9,color:C.green}}>● LIVE + 월간 추세</span>}>
+                <FXWithSparkline/>
+              </Box>
+            </div>
+
+            <div style={{display:"grid", gridTemplateColumns:"1fr 200px 1fr", gap:10}}>
+              <Box title="암호화폐 (실시간) · Crypto"><CryptoLive/></Box>
+              <Box title="금리 · Rates">
+                <div style={{padding:"8px 10px",display:"flex",flexDirection:"column",gap:4}}>
+                  {RATES.map(r=>{
+                    const down=r.value<r.prev;
+                    const tc=r.term==="Policy"?C.purple:r.term==="Short"?C.gold:C.green;
+                    return (
+                      <div key={r.name} style={{padding:"4px 8px",background:C.bg,borderRadius:4,border:`1px solid ${C.border}`}}>
+                        <div style={{display:"flex",justifyContent:"space-between"}}>
+                          <span style={{fontSize:8,color:C.muted}}>{r.name}</span>
+                          <span style={{fontSize:7,color:tc}}>{r.term}</span>
+                        </div>
+                        <div style={{display:"flex",justifyContent:"space-between"}}>
+                          <span style={{fontSize:12,fontWeight:700,color:C.text}}>{r.value.toFixed(2)}%</span>
+                          <span style={{fontSize:9,color:down?C.green:C.red}}>{down?"▼":"▲"}{Math.abs(r.value-r.prev).toFixed(2)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Box>
+              <Box title="원자재 · Commodities">
+                <div style={{padding:"8px 10px",display:"flex",flexDirection:"column",gap:5}}>
+                  {[
+                    {s:"XAU/USD",p:3018.4,c:0.82, col:"#ffd700"},
+                    {s:"XAG/USD",p:33.24, c:1.14, col:"#c0c0c0"},
+                    {s:"WTI", p:68.45, c:-0.63,col:"#ff7043"},
+                    {s:"Brent", p:72.18, c:-0.41,col:"#ff9800"},
+                    {s:"NatGas", p:3.82, c:2.15, col:"#4caf50"},
+                    {s:"Copper", p:4.52, c:0.35, col:"#b87333"},
+                  ].map(x=>(
+                    <div key={x.s} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 8px",background:C.bg,borderRadius:4,border:`1px solid ${C.border}`}}>
+                      <span style={{color:x.col,fontSize:9,fontWeight:700,minWidth:52}}>{x.s}</span>
+                      <span style={{color:C.text,fontSize:10}}>${x.p.toFixed(2)}</span>
+                      <span style={{color:x.c>=0?C.green:C.red,fontSize:9}}>{x.c>=0?"▲":"▼"}{Math.abs(x.c).toFixed(2)}%</span>
+                    </div>
+                  ))}
+                </div>
+              </Box>
+            </div>
+
+            <Box title="경제 캘린더 · Economic Calendar" badge={<span style={{fontSize:9,color:C.green}}>● TRADINGVIEW LIVE</span>}>
+              <TV type="events" height={240} opts={{
+                importanceFilter:"0,1",
+                countryFilter:"us,eu,jp,kr,cn,gb",
+              }}/>
+            </Box>
+
+            <Box title="Market Insight" style={{marginTop: 10}}>
+              <div style={{padding:"16px", fontSize:12, lineHeight:1.6}}>
+                <div style={{color:C.accent, fontWeight:700, marginBottom:10, fontSize:14}}>🤖 Jarvis Core 3.1 Analysis ({JARVIS_INSIGHT.date})</div>
+                <div style={{color:C.text, background:"#0d1117", padding:"12px", borderRadius:6, border:`1px solid ${C.border}`}}>{JARVIS_INSIGHT.summary}</div>
+                <div style={{marginTop:12, color:C.gold, fontWeight:700}}>Strategic Action Plan:</div>
+                <div style={{color:C.gold, opacity:0.9}}>{JARVIS_INSIGHT.strategy}</div>
+              </div>
+            </Box>
+          </div>
+
+          <div style={{ padding:"10px 16px", borderTop:`1px solid ${C.border}`, display:"flex", justifyContent:"space-between", fontSize:9, color:C.dim, background:"#040608" }}>
+            <span>Jarvis Macro Terminal v3.5 &nbsp;|&nbsp; Unified Intelligence Hub</span>
+            <span style={{ color:C.muted }}>SYSTEM ONLINE · ALL SENSORS NOMINAL</span>
           </div>
         </div>
       );
