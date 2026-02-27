@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MACRO TERMINAL · Global Markets Dashboard</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { min-height: 100vh; background: #060810; }
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: #060810; }
+    ::-webkit-scrollbar-thumb { background: #1c2333; border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const C = {
+      bg:"#060810", panel:"#0d1117", border:"#1c2333",
+      accent:"#00d4ff", gold:"#f0b429", green:"#00e676",
+      red:"#ff1744", purple:"#bb86fc", text:"#e0e6f0",
+      muted:"#5a6a7a", dim:"#3a4a5a",
+    };
+
+    const RATES = [
+      { name:"US Fed",  value:4.25, prev:4.50, term:"Policy" },
+      { name:"US 2Y",   value:4.18, prev:4.22, term:"Short" },
+      { name:"US 10Y",  value:4.52, prev:4.48, term:"Long" },
+      { name:"US 30Y",  value:4.73, prev:4.69, term:"Long" },
+      { name:"ECB",     value:2.65, prev:2.90, term:"Policy" },
+      { name:"BOJ",     value:0.50, prev:0.25, term:"Policy" },
+      { name:"BOK",     value:2.75, prev:3.00, term:"Policy" },
+    ];
+
+    const NODES = [
+      { id:"us_eq",  label:"미국 주식",     en:"US Equities",    x:0.75, y:0.18, r:68, color:"#00d4ff" },
+      { id:"eu_eq",  label:"유럽 주식",     en:"EU Equities",    x:0.22, y:0.22, r:48, color:"#7c6af5" },
+      { id:"asia",   label:"아시아 신흥국", en:"EM Asia",        x:0.12, y:0.55, r:52, color:"#f0b429" },
+      { id:"kr_eq",  label:"한국 주식",     en:"KR Equities",    x:0.28, y:0.78, r:38, color:"#ff9800" },
+      { id:"bonds",  label:"채권",          en:"Bonds",          x:0.50, y:0.15, r:55, color:"#4caf50" },
+      { id:"gold",   label:"금",            en:"Gold",           x:0.82, y:0.62, r:42, color:"#ffd700" },
+      { id:"crypto", label:"암호화폐",      en:"Crypto",         x:0.62, y:0.80, r:50, color:"#ff6b6b" },
+      { id:"usd",    label:"달러 현금",     en:"Cash/USD",       x:0.50, y:0.50, r:45, color:"#00e676" },
+      { id:"comm",   label:"원자재",        en:"Commodities",    x:0.18, y:0.36, r:36, color:"#ff7043" },
+    ];
+
+    const EDGES = [
+      { from:"bonds",  to:"us_eq",  w:0.8,  label:"금리인하 기대" },
+      { from:"asia",   to:"us_eq",  w:0.6,  label:"달러 강세" },
+      { from:"eu_eq",  to:"us_eq",  w:0.5,  label:"성장 격차" },
+      { from:"usd",    to:"crypto", w:0.7,  label:"리스크온" },
+      { from:"usd",    to:"us_eq",  w:0.6,  label:"AI 붐" },
+      { from:"bonds",  to:"usd",    w:0.4,  label:"안전자산" },
+      { from:"asia",   to:"gold",   w:0.5,  label:"지정학 헤지" },
+      { from:"usd",    to:"gold",   w:0.3,  label:"인플레 헤지" },
+      { from:"eu_eq",  to:"bonds",  w:0.4,  label:"ECB 완화" },
+      { from:"kr_eq",  to:"usd",    w:0.35, label:"외국인 순매도" },
+      { from:"comm",   to:"asia",   w:0.3,  label:"원자재 수요" },
+      { from:"crypto", to:"us_eq",  w:0.45, label:"기관 순환" },
+    ];
+
+    // ── TradingView 위젯 ─────────────────────────────────────────
+    function TV({ type, opts, height }) {
+      const ref = useRef(null);
+      const uid = useRef("tv_" + Math.random().toString(36).slice(2));
+      useEffect(() => {
+        if (!ref.current) return;
+        ref.current.innerHTML = "";
+        const wrap = document.createElement("div");
+        wrap.id = uid.current;
+        ref.current.appendChild(wrap);
+        const s = document.createElement("script");
+        s.src = `https://s3.tradingview.com/external-embedding/embed-widget-${type}.js`;
+        s.async = true;
+        s.innerHTML = JSON.stringify({ ...opts, container_id: uid.current, width:"100%", height, colorTheme:"dark", locale:"kr", isTransparent:true });
+        wrap.appendChild(s);
+        return () => { if (ref.current) ref.current.innerHTML = ""; };
+      }, []);
+      return <div ref={ref} style={{ width:"100%", height, overflow:"hidden" }} />;
+    }
+
+    // ── 자금 흐름 파티클 ─────────────────────────────────────────
+    function Particle({ from, to, speed, color }) {
+      const prog = useRef(Math.random());
+      const [p, setP] = useState(prog.current);
+      useEffect(() => {
+        let raf, last = performance.now();
+        const tick = (now) => {
+          prog.current = (prog.current + (now - last) / 1000 * speed) % 1;
+          last = now; setP(prog.current);
+          raf = requestAnimationFrame(tick);
+        };
+        raf = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(raf);
+      }, [speed]);
+      const x = from.x + (to.x - from.x) * p;
+      const y = from.y + (to.y - from.y) * p;
+      return (
+        <circle
+          cx={`${x * 100}%`} cy={`${y * 100}%`}
+          r={3 + (1 - Math.abs(p - 0.5) * 2) * 3}
+          fill={color} opacity={0.55 + p * 0.45}
+        />
+      );
+    }
+
+    function FlowMap({ tab }) {
+      const [tick, setTick] = useState(0);
+      useEffect(() => { const iv = setInterval(() => setTick(t => t + 1), 60); return () => clearInterval(iv); }, []);
+
+      const particles = useRef(
+        EDGES.flatMap(e => Array.from({ length: Math.floor(e.w * 8) }, (_, i) => ({
+          id: `${e.from}${e.to}${i}`, from: e.from, to: e.to,
+          speed: 0.07 + Math.random() * 0.12,
+          color: NODES.find(n => n.id === e.from)?.color || "#fff",
+        })))
+      );
+
+      if (tab === "info") return (
+        <div style={{ padding:10, display:"flex", flexWrap:"wrap", gap:6, overflowY:"auto", maxHeight:300 }}>
+          {EDGES.map(e => {
+            const f = NODES.find(n => n.id === e.from);
+            const t = NODES.find(n => n.id === e.to);
+            return (
+              <div key={e.from + e.to} style={{ padding:"6px 10px", background:C.bg, borderRadius:4, border:`1px solid ${f?.color}44`, minWidth:170, flex:"1 1 170px" }}>
+                <div style={{ fontSize:10, color:f?.color, fontWeight:700, marginBottom:2 }}>{f?.label} → {t?.label}</div>
+                <div style={{ fontSize:9, color:C.muted }}>{e.label}</div>
+                <div style={{ marginTop:4, height:3, background:C.border, borderRadius:2 }}>
+                  <div style={{ width:`${e.w * 100}%`, height:"100%", background:f?.color, borderRadius:2 }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+
+      return (
+        <svg width="100%" height="100%" style={{ display:"block" }}>
+          <defs>
+            <filter id="glow">
+              <feGaussianBlur stdDeviation="3" result="b" />
+              <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
+          </defs>
+          {EDGES.map(e => {
+            const f = NODES.find(n => n.id === e.from), t = NODES.find(n => n.id === e.to);
+            if (!f || !t) return null;
+            const x1=f.x*100, y1=f.y*100, x2=t.x*100, y2=t.y*100;
+            return (
+              <path key={e.from+e.to}
+                d={`M${x1}% ${y1}% Q${(x1+x2)/2+(y2-y1)*0.15}% ${(y1+y2)/2-(x2-x1)*0.15}% ${x2}% ${y2}%`}
+                stroke={f.color} strokeWidth="1" strokeOpacity={0.12+e.w*0.1}
+                fill="none" strokeDasharray="4 8"
+              />
+            );
+          })}
+          {particles.current.map(p => {
+            const f = NODES.find(n => n.id === p.from), t = NODES.find(n => n.id === p.to);
+            return f && t ? <Particle key={p.id} from={f} to={t} speed={p.speed} color={p.color} /> : null;
+          })}
+          {NODES.map(nd => {
+            const pulse = Math.sin(tick * 0.06 + nd.x * 10) * 0.12 + 0.88;
+            return (
+              <g key={nd.id}>
+                <circle cx={`${nd.x*100}%`} cy={`${nd.y*100}%`} r={nd.r*pulse*0.9} fill={nd.color} opacity="0.04" />
+                <circle cx={`${nd.x*100}%`} cy={`${nd.y*100}%`} r={nd.r*0.55} fill={nd.color} opacity="0.1" filter="url(#glow)" />
+                <circle cx={`${nd.x*100}%`} cy={`${nd.y*100}%`} r={nd.r*0.38} fill={C.panel} stroke={nd.color} strokeWidth="1.5" strokeOpacity="0.75" />
+                <text x={`${nd.x*100}%`} y={`${nd.y*100}%`} textAnchor="middle" dy="-4" fill={nd.color} fontSize="10" fontWeight="700" fontFamily="JetBrains Mono,monospace">{nd.label}</text>
+                <text x={`${nd.x*100}%`} y={`${nd.y*100}%`} textAnchor="middle" dy="9" fill={nd.color} fontSize="8" opacity="0.6" fontFamily="JetBrains Mono,monospace">{nd.en}</text>
+              </g>
+            );
+          })}
+        </svg>
+      );
+    }
+
+    // ── 암호화폐 (CoinGecko 실시간) ──────────────────────────────
+    function CryptoLive() {
+      const [data, setData] = useState([
+        {n:"BTC",p:85420,c:2.3},{n:"ETH",p:2180,c:1.8},
+        {n:"USDT",p:1.0,c:0.0},{n:"XRP",p:2.18,c:-1.2},{n:"SOL",p:142.5,c:3.1},
+      ]);
+      const [live, setLive] = useState(false);
+      useEffect(() => {
+        const go = async () => {
+          try {
+            const r = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,tether,ripple,solana&vs_currencies=usd&include_24hr_change=true");
+            if (!r.ok) return;
+            const d = await r.json();
+            setData([
+              {n:"BTC",  p:d.bitcoin?.usd,  c:d.bitcoin?.usd_24h_change},
+              {n:"ETH",  p:d.ethereum?.usd, c:d.ethereum?.usd_24h_change},
+              {n:"USDT", p:d.tether?.usd,   c:d.tether?.usd_24h_change},
+              {n:"XRP",  p:d.ripple?.usd,   c:d.ripple?.usd_24h_change},
+              {n:"SOL",  p:d.solana?.usd,   c:d.solana?.usd_24h_change},
+            ]);
+            setLive(true);
+          } catch {}
+        };
+        go(); const iv = setInterval(go, 30000); return () => clearInterval(iv);
+      }, []);
+      return (
+        <div style={{ padding:"8px 10px", display:"flex", flexDirection:"column", gap:5 }}>
+          {data.map(x => (
+            <div key={x.n} style={{ display:"flex", justifyContent:"space-between", padding:"5px 8px", background:C.bg, borderRadius:4, border:`1px solid ${C.border}` }}>
+              <span style={{ color:C.gold, fontFamily:"JetBrains Mono", fontSize:10, fontWeight:700 }}>{x.n}</span>
+              <span style={{ color:C.text, fontFamily:"JetBrains Mono", fontSize:10 }}>
+                ${x.p < 10 ? x.p?.toFixed(4) : x.p?.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}
+              </span>
+              <span style={{ color:x.c>=0?C.green:C.red, fontSize:9 }}>{x.c>=0?"▲":"▼"}{Math.abs(x.c||0).toFixed(2)}%</span>
+            </div>
+          ))}
+          <div style={{ fontSize:9, color:live?C.green:C.muted, textAlign:"right", fontFamily:"JetBrains Mono" }}>
+            {live ? "● LIVE · CoinGecko" : "○ 연결 중..."}
+          </div>
+        </div>
+      );
+    }
+
+    // ── 환율 (ExchangeRate-API 실시간) ──────────────────────────
+    function FXLive() {
+      const [r, setR] = useState({KRW:1368.5,JPY:149.2,EUR:0.918,GBP:0.782,CNY:7.24,MXN:17.85});
+      const [live, setLive] = useState(false);
+      useEffect(() => {
+        const go = async () => {
+          try {
+            const res = await fetch("https://api.exchangerate-api.com/v4/latest/USD");
+            if (!res.ok) return;
+            const d = await res.json();
+            setR({KRW:d.rates.KRW,JPY:d.rates.JPY,EUR:d.rates.EUR,GBP:d.rates.GBP,CNY:d.rates.CNY,MXN:d.rates.MXN});
+            setLive(true);
+          } catch {}
+        };
+        go(); const iv = setInterval(go, 60000); return () => clearInterval(iv);
+      }, []);
+      const pairs = [
+        {p:"USD/KRW",v:r.KRW,f:"🇺🇸🇰🇷"},{p:"USD/JPY",v:r.JPY,f:"🇺🇸🇯🇵"},
+        {p:"EUR/USD",v:(1/r.EUR).toFixed(4),f:"🇪🇺🇺🇸"},{p:"GBP/USD",v:(1/r.GBP).toFixed(4),f:"🇬🇧🇺🇸"},
+        {p:"USD/CNY",v:r.CNY,f:"🇺🇸🇨🇳"},{p:"USD/MXN",v:r.MXN,f:"🇺🇸🇲🇽"},
+      ];
+      return (
+        <div style={{ padding:"8px 10px", display:"flex", flexDirection:"column", gap:5 }}>
+          {pairs.map(x => (
+            <div key={x.p} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"5px 8px", background:C.bg, borderRadius:4, border:`1px solid ${C.border}` }}>
+              <span style={{ fontSize:11 }}>{x.f}</span>
+              <span style={{ color:C.accent, fontFamily:"JetBrains Mono", fontSize:10, fontWeight:700 }}>{x.p}</span>
+              <span style={{ color:C.text, fontFamily:"JetBrains Mono", fontSize:10 }}>{parseFloat(x.v).toFixed(x.p.includes("KRW")?1:4)}</span>
+            </div>
+          ))}
+          <div style={{ fontSize:9, color:live?C.green:C.muted, textAlign:"right", fontFamily:"JetBrains Mono" }}>
+            {live ? "● LIVE · ExchangeRate-API" : "○ 연결 중..."}
+          </div>
+        </div>
+      );
+    }
+
+    // ── 패널 래퍼 ─────────────────────────────────────────────────
+    function Box({ title, badge, children, style }) {
+      return (
+        <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:6, overflow:"hidden", ...style }}>
+          <div style={{ fontFamily:"'Space Grotesk',sans-serif", fontSize:11, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", color:C.muted, padding:"8px 12px", borderBottom:`1px solid ${C.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <span>{title}</span>
+            {badge && <span>{badge}</span>}
+          </div>
+          {children}
+        </div>
+      );
+    }
+
+    // ── 메인 앱 ───────────────────────────────────────────────────
+    function App() {
+      const [flowTab, setFlowTab] = useState("flow");
+      const [clock, setClock] = useState(new Date());
+      useEffect(() => { const iv = setInterval(() => setClock(new Date()), 1000); return () => clearInterval(iv); }, []);
+
+      const kst = new Date(clock.toLocaleString("en-US", { timeZone:"Asia/Seoul" }));
+      const nyc = new Date(clock.toLocaleString("en-US", { timeZone:"America/New_York" }));
+      const nyOpen = nyc.getHours() >= 9 && nyc.getHours() < 16;
+
+      return (
+        <div style={{ background:C.bg, minHeight:"100vh", fontFamily:"'JetBrains Mono','Courier New',monospace", color:C.text }}>
+
+          {/* ── 헤더 ── */}
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"0 16px", height:44, background:"#040608", borderBottom:`1px solid ${C.border}` }}>
+            <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+              <div style={{ width:3, height:22, background:C.accent, borderRadius:2 }} />
+              <span style={{ fontFamily:"Space Grotesk", fontSize:16, fontWeight:700, color:C.accent, letterSpacing:"0.05em" }}>MACRO TERMINAL</span>
+              <span style={{ fontSize:9, color:C.muted, background:C.panel, padding:"2px 8px", borderRadius:10, border:`1px solid ${C.border}` }}>GLOBAL MARKETS · TRADINGVIEW</span>
+            </div>
+            <div style={{ display:"flex", gap:16, fontSize:10, color:C.muted, alignItems:"center" }}>
+              <span>KST <span style={{ color:C.accent }}>{kst.toLocaleTimeString("ko-KR",{hour12:false})}</span></span>
+              <span>NYC <span style={{ color:C.gold }}>{nyc.toLocaleTimeString("en-US",{hour12:false})}</span></span>
+              <span style={{ color:nyOpen?C.green:C.red, fontSize:9, padding:"2px 8px", border:`1px solid ${(nyOpen?C.green:C.red)}55`, borderRadius:3 }}>
+                ● NYSE {nyOpen?"OPEN":"CLOSED"}
+              </span>
+            </div>
+          </div>
+
+          {/* ── TradingView 티커 테이프 ── */}
+          <div style={{ borderBottom:`1px solid ${C.border}`, height:46, overflow:"hidden" }}>
+            <TV type="ticker-tape" height={46} opts={{
+              symbols:[
+                {proName:"FOREXCOM:SPXUSD",title:"S&P 500"},
+                {proName:"FOREXCOM:NSXUSD",title:"NASDAQ 100"},
+                {proName:"DJ:DJI",title:"DOW JONES"},
+                {proName:"KRX:KOSPI",title:"KOSPI"},
+                {proName:"INDEX:NKY",title:"NIKKEI 225"},
+                {proName:"INDEX:DEU40",title:"DAX"},
+                {proName:"INDEX:HSI",title:"항셍"},
+                {proName:"SSE:000001",title:"상하이"},
+                {proName:"BITSTAMP:BTCUSD",title:"BTC/USD"},
+                {proName:"BITSTAMP:ETHUSD",title:"ETH/USD"},
+                {proName:"FOREXCOM:USDKRW",title:"USD/KRW"},
+                {proName:"FOREXCOM:USDJPY",title:"USD/JPY"},
+                {proName:"COMEX:GC1!",title:"금 선물"},
+                {proName:"NYMEX:CL1!",title:"WTI 원유"},
+              ],
+              showSymbolLogo:false, displayMode:"adaptive",
+            }} />
+          </div>
+
+          <div style={{ padding:"10px 12px", display:"flex", flexDirection:"column", gap:10 }}>
+
+            {/* ── 글로벌 증시 ── */}
+            <Box title="글로벌 증시 · Global Indices" badge={<span style={{ fontSize:9, color:C.green }}>● TRADINGVIEW REAL-TIME</span>}>
+              <TV type="market-overview" height={230} opts={{
+                dateRange:"1D", showChart:true,
+                plotLineColorGrowing:"rgba(0,212,255,1)", plotLineColorFalling:"rgba(255,23,68,1)",
+                gridLineColor:"rgba(28,35,51,1)", scaleFontColor:"rgba(90,106,122,1)",
+                belowLineFillColorGrowing:"rgba(0,212,255,0.12)", belowLineFillColorFalling:"rgba(255,23,68,0.12)",
+                showFloatingTooltip:true, showSymbolLogo:true,
+                tabs:[
+                  { title:"주요 지수", symbols:[
+                    {s:"FOREXCOM:SPXUSD",d:"S&P 500"},{s:"FOREXCOM:NSXUSD",d:"NASDAQ 100"},
+                    {s:"DJ:DJI",d:"DOW JONES"},{s:"KRX:KOSPI",d:"KOSPI"},
+                    {s:"INDEX:NKY",d:"NIKKEI 225"},{s:"INDEX:DEU40",d:"DAX"},
+                    {s:"INDEX:HSI",d:"항셍"},{s:"SSE:000001",d:"상하이"},
+                  ]},
+                  { title:"아시아", symbols:[
+                    {s:"KRX:KOSPI",d:"KOSPI"},{s:"INDEX:NKY",d:"NIKKEI"},
+                    {s:"INDEX:HSI",d:"항셍"},{s:"SSE:000001",d:"상하이"},
+                    {s:"NSE:NIFTY50",d:"NIFTY 50"},{s:"ASX:XJO",d:"ASX 200"},
+                  ]},
+                  { title:"유럽", symbols:[
+                    {s:"INDEX:DEU40",d:"DAX"},{s:"INDEX:UKX",d:"FTSE 100"},
+                    {s:"INDEX:CAC40",d:"CAC 40"},{s:"INDEX:SMI",d:"SMI"},
+                  ]},
+                  { title:"미주", symbols:[
+                    {s:"FOREXCOM:SPXUSD",d:"S&P 500"},{s:"FOREXCOM:NSXUSD",d:"NASDAQ"},
+                    {s:"DJ:DJI",d:"DOW"},{s:"BMFBOVESPA:IBOV",d:"BOVESPA"},
+                  ]},
+                ],
+              }} />
+            </Box>
+
+            {/* ── 섹터 히트맵 + 자금흐름 ── */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              <Box title="S&P 500 섹터 히트맵" badge={<span style={{ fontSize:9, color:C.green }}>● LIVE</span>}>
+                <TV type="stock-heatmap" height={310} opts={{
+                  exchanges:[], dataSource:"SPX500", grouping:"sector",
+                  blockSize:"market_cap_basic", blockColor:"change",
+                  hasTopBar:false, isDataSetEnabled:false, isZoomEnabled:true, hasSymbolTooltip:true,
+                }} />
+              </Box>
+
+              <Box title="자금 흐름 시각화 · Capital Flow"
+                badge={
+                  <div style={{ display:"flex", gap:6 }}>
+                    {["flow","info"].map(t => (
+                      <button key={t} onClick={() => setFlowTab(t)}
+                        style={{ fontSize:9, padding:"2px 8px", borderRadius:3, border:`1px solid ${flowTab===t?C.accent:C.border}`, background:flowTab===t?C.accent+"22":"transparent", color:flowTab===t?C.accent:C.muted, cursor:"pointer" }}>
+                        {t==="flow"?"MAP":"INFO"}
+                      </button>
+                    ))}
+                  </div>
+                }>
+                <div style={{ height:310, position:"relative" }}><FlowMap tab={flowTab} /></div>
+              </Box>
+            </div>
+
+            {/* ── FX 크로스 + 암호화폐 스크리너 ── */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              <Box title="환율 크로스 · FX Cross Rates" badge={<span style={{ fontSize:9, color:C.green }}>● TRADINGVIEW LIVE</span>}>
+                <TV type="forex-cross-rates" height={260} opts={{
+                  currencies:["USD","KRW","EUR","JPY","GBP","CNY","AUD","CAD","MXN"],
+                }} />
+              </Box>
+              <Box title="암호화폐 마켓 · Crypto Market" badge={<span style={{ fontSize:9, color:C.green }}>● TRADINGVIEW LIVE</span>}>
+                <TV type="screener" height={260} opts={{
+                  defaultScreen:"crypto", market:"crypto", showToolbar:false,
+                }} />
+              </Box>
+            </div>
+
+            {/* ── 하단 4개 패널 ── */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 200px 1fr", gap:10 }}>
+              <Box title="환율 (실시간) · FX"><FXLive /></Box>
+              <Box title="암호화폐 (실시간) · Crypto"><CryptoLive /></Box>
+
+              <Box title="금리 · Rates">
+                <div style={{ padding:"8px 10px", display:"flex", flexDirection:"column", gap:4 }}>
+                  {RATES.map(r => {
+                    const down = r.value < r.prev;
+                    const tc = r.term==="Policy"?C.purple:r.term==="Short"?C.gold:C.green;
+                    return (
+                      <div key={r.name} style={{ padding:"4px 8px", background:C.bg, borderRadius:4, border:`1px solid ${C.border}` }}>
+                        <div style={{ display:"flex", justifyContent:"space-between" }}>
+                          <span style={{ fontSize:8, color:C.muted }}>{r.name}</span>
+                          <span style={{ fontSize:7, color:tc }}>{r.term}</span>
+                        </div>
+                        <div style={{ display:"flex", justifyContent:"space-between" }}>
+                          <span style={{ fontSize:12, fontWeight:700, color:C.text }}>{r.value.toFixed(2)}%</span>
+                          <span style={{ fontSize:9, color:down?C.green:C.red }}>{down?"▼":"▲"}{Math.abs(r.value-r.prev).toFixed(2)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Box>
+
+              <Box title="원자재 · Commodities">
+                <div style={{ padding:"8px 10px", display:"flex", flexDirection:"column", gap:5 }}>
+                  {[
+                    {s:"XAU/USD",p:3018.4,c:0.82, col:"#ffd700"},
+                    {s:"XAG/USD",p:33.24, c:1.14, col:"#c0c0c0"},
+                    {s:"WTI",    p:68.45, c:-0.63,col:"#ff7043"},
+                    {s:"Brent", p:72.18, c:-0.41,col:"#ff9800"},
+                    {s:"NatGas",p:3.82,  c:2.15, col:"#4caf50"},
+                    {s:"Copper",p:4.52,  c:0.35, col:"#b87333"},
+                  ].map(x => (
+                    <div key={x.s} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"5px 8px", background:C.bg, borderRadius:4, border:`1px solid ${C.border}` }}>
+                      <span style={{ color:x.col, fontSize:9, fontWeight:700, minWidth:50 }}>{x.s}</span>
+                      <span style={{ color:C.text, fontSize:10 }}>${x.p.toFixed(2)}</span>
+                      <span style={{ color:x.c>=0?C.green:C.red, fontSize:9 }}>{x.c>=0?"▲":"▼"}{Math.abs(x.c).toFixed(2)}%</span>
+                    </div>
+                  ))}
+                </div>
+              </Box>
+            </div>
+
+            {/* ── 경제 캘린더 ── */}
+            <Box title="경제 캘린더 · Economic Calendar" badge={<span style={{ fontSize:9, color:C.green }}>● TRADINGVIEW LIVE</span>}>
+              <TV type="events" height={240} opts={{
+                importanceFilter:"0,1",
+                countryFilter:"us,eu,jp,kr,cn,gb",
+              }} />
+            </Box>
+
+          </div>
+
+          {/* ── 푸터 ── */}
+          <div style={{ padding:"6px 16px", borderTop:`1px solid ${C.border}`, display:"flex", justifyContent:"space-between", fontSize:8, color:C.dim }}>
+            <span>증시/섹터/환율/캘린더: TradingView (무료 공식 위젯) &nbsp;|&nbsp; 암호화폐: CoinGecko API &nbsp;|&nbsp; 환율: ExchangeRate-API</span>
+            <span style={{ color:C.muted }}>MACRO TERMINAL v2.1</span>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
