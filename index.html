@@ -470,18 +470,94 @@
           });
         }
       },[rates]);
-      const pairs = [{p:"USD/KRW",v:rates.KRW,f:"🇺🇸🇰🇷"},{p:"USD/JPY",v:rates.JPY,f:"🇺🇸🇯🇵"},{p:"EUR/USD",v:(1/rates.EUR).toFixed(4),f:"🇪🇺🇺🇸"},{p:"GBP/USD",v:(1/rates.GBP).toFixed(4),f:"🇬🇧🇺🇸"}];
+
+      const pairs = [
+        {p:"USD/KRW", v:rates.KRW, f:"🇺🇸🇰🇷", decimals:1},
+        {p:"USD/JPY", v:rates.JPY, f:"🇺🇸🇯🇵", decimals:2},
+        {p:"EUR/USD", v:1/rates.EUR, f:"🇪🇺🇺🇸", decimals:4},
+        {p:"GBP/USD", v:1/rates.GBP, f:"🇬🇧🇺🇸", decimals:4},
+        {p:"USD/CNY", v:rates.CNY, f:"🇺🇸🇨🇳", decimals:4},
+        {p:"USD/MXN", v:rates.MXN, f:"🇺🇸🇲🇽", decimals:4},
+        {p:"AUD/USD", v:1/rates.AUD, f:"🇦🇺🇺🇸", decimals:4},
+        {p:"USD/CAD", v:rates.CAD, f:"🇺🇸🇨🇦", decimals:4},
+      ];
+
       return (
-        <div style={{ padding:"8px 10px", display:"flex", flexDirection:"column", gap:10 }}>
-          {pairs.map(x => (
-            <div key={x.p} style={{ background:C.bg, borderRadius:6, border:`1px solid ${C.border}`, padding:"8px 10px" }}>
-              <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4}}>
-                <span style={{fontSize:11}}>{x.f} <span style={{color:C.accent, fontWeight:700}}>{x.p}</span></span>
-                <span style={{color:C.text, fontFamily:"JetBrains Mono", fontSize:11, fontWeight:700}}>{parseFloat(x.v).toFixed(x.p.includes("KRW")?1:4)}</span>
+        <div style={{padding:"8px 10px", display:"flex", flexDirection:"column", gap:5}}>
+          {pairs.map(x=>{
+            const spark=history[x.p];
+            const last=spark?spark[spark.length-1]:null;
+            const first=spark?spark[0]:null;
+            const change=last&&first?((last-first)/first*100):0;
+            return (
+              <div key={x.p} style={{display:"flex", alignItems:"center", gap:8, padding:"5px 8px", background:C.bg, borderRadius:5, border:`1px solid ${C.border}`}}>
+                <span style={{fontSize:11}}>{x.f}</span>
+                <span style={{color:C.accent, fontFamily:"JetBrains Mono", fontSize:10, fontWeight:700, minWidth:72}}>{x.p}</span>
+                <span style={{color:C.text, fontFamily:"JetBrains Mono", fontSize:11, fontWeight:700, minWidth:70}}>
+                  {parseFloat(x.v).toFixed(x.decimals)}
+                </span>
+                {spark && <Sparkline data={spark} color={x.p} width={70} height={24}/>}
+                {spark && (
+                  <span style={{fontSize:9, color:change>=0?C.green:C.red, fontFamily:"JetBrains Mono", minWidth:44, textAlign:"right"}}>
+                    {change>=0?"▲":"▼"}{Math.abs(change).toFixed(2)}%
+                  </span>
+                )}
               </div>
-              <Sparkline data={history[x.p]} color={C.accent} width={175} height={20} />
+            );
+          })}
+          <div style={{fontSize:9, color:live?C.green:C.muted, textAlign:"right", fontFamily:"JetBrains Mono"}}>
+            {live?"● LIVE · ExchangeRate-API":"○ 연결 중..."}
+          </div>
+        </div>
+      );
+    }
+
+    function CryptoLive() {
+      const [data, setData] = useState([
+        {n:"BTC",p:85420,c:2.3},{n:"ETH",p:2180,c:1.8},
+        {n:"USDT",p:1.0,c:0.0},{n:"XRP",p:2.18,c:-1.2},{n:"SOL",p:142.5,c:3.1},
+      ]);
+      const [live, setLive] = useState(false);
+      useEffect(()=>{
+        const go=async()=>{
+          try{
+            const r=await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,tether,ripple,solana&vs_currencies=usd&include_24hr_change=true");
+            if(!r.ok)return;
+            const d=await r.json();
+            setData([
+              {n:"BTC",  p:d.bitcoin?.usd,  c:d.bitcoin?.usd_24h_change},
+              {n:"ETH",  p:d.ethereum?.usd, c:d.ethereum?.usd_24h_change},
+              {n:"USDT", p:d.tether?.usd,   c:d.tether?.usd_24h_change},
+              {n:"XRP",  p:d.ripple?.usd,   c:d.ripple?.usd_24h_change},
+              {n:"SOL",  p:d.solana?.usd,   c:d.solana?.usd_24h_change},
+            ]);
+            setLive(true);
+          } catch {}
+        };
+        go(); const iv=setInterval(go,30000); return()=>clearInterval(iv);
+      },[]);
+      return (
+        <div style={{padding:"8px 10px", display:"flex", flexDirection:"column", gap:5}}>
+          {data.map(x=>(
+            <div key={x.n} style={{display:"flex", justifyContent:"space-between", padding:"5px 8px", background:C.bg, borderRadius:4, border:`1px solid ${C.border}` }}>
+              <span style={{color:C.gold,fontFamily:"JetBrains Mono",fontSize:10,fontWeight:700}}>{x.n}</span>
+              <span style={{color:C.text,fontFamily:"JetBrains Mono",fontSize:10}}>${x.p<10?x.p?.toFixed(4):x.p?.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
+              <span style={{color:x.c>=0?C.green:C.red,fontSize:9}}>{x.c>=0?"▲":"▼"}{Math.abs(x.c||0).toFixed(2)}%</span>
             </div>
           ))}
+          <div style={{fontSize:9,color:live?C.green:C.muted,textAlign:"right",fontFamily:"JetBrains Mono"}}>{live?"● LIVE · CoinGecko":"○ 연결 중..."}</div>
+        </div>
+      );
+    }
+
+    function Box({title,badge,children,style}){
+      return (
+        <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:6,overflow:"hidden",...style}}>
+          <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:11,fontWeight:700,letterSpacing:"0.1em",textTransform:"uppercase",color:C.muted,padding:"8px 12px",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span>{title}</span>
+            {badge && <span>{badge}</span>}
+          </div>
+          {children}
         </div>
       );
     }
