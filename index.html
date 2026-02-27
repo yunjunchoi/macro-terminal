@@ -39,42 +39,18 @@
     const MONTHS = ["1월","2월","3월","4월","5월","6월","7월","8월","9월","10월","11월","12월"];
 
     const EDGES_MONTHLY = [
-      { from:"bonds",  to:"us_eq",  label:"금리인하 기대", tier:"xl",
-        amounts:[460,440,400,370,320,280,260,290,340,390,430,480],
-      },
-      { from:"usd",    to:"crypto", label:"리스크온", tier:"xl",
-        amounts:[350,380,420,390,340,280,230,260,310,360,400,440],
-      },
-      { from:"asia",   to:"us_eq",  label:"달러 강세", tier:"lg",
-        amounts:[300,290,270,250,230,200,190,210,250,270,290,310],
-      },
-      { from:"usd",    to:"us_eq",  label:"AI 붐", tier:"lg",
-        amounts:[240,260,290,310,330,300,270,280,310,340,320,290],
-      },
-      { from:"eu_eq",  to:"us_eq",  label:"성장 격차", tier:"lg",
-        amounts:[200,195,185,175,165,150,140,155,170,185,195,205],
-      },
-      { from:"asia",   to:"gold",   label:"지정학 헤지", tier:"lg",
-        amounts:[160,170,190,210,200,185,175,180,200,220,195,170],
-      },
-      { from:"eu_eq",  to:"bonds",  label:"ECB 완화", tier:"md",
-        amounts:[150,145,135,125,120,115,110,115,125,135,145,155],
-      },
-      { from:"bonds",  to:"usd",    label:"안전자산", tier:"md",
-        amounts:[140,135,120,110,100,120,140,130,115,105,120,145],
-      },
-      { from:"crypto", to:"us_eq",  label:"기관 순환", tier:"md",
-        amounts:[100,110,130,150,140,120,100,110,130,160,170,150],
-      },
-      { from:"kr_eq",  to:"usd",    label:"외국인 순매도", tier:"sm",
-        amounts:[90,85,80,75,70,65,60,65,75,80,85,90],
-      },
-      { from:"usd",    to:"gold",   label:"인플레 헤지", tier:"sm",
-        amounts:[70,72,75,80,85,90,88,82,78,74,70,68],
-      },
-      { from:"comm",   to:"asia",   label:"원자재 수요", tier:"sm",
-        amounts:[60,62,65,70,72,68,64,66,70,72,68,62],
-      },
+      { from:"bonds",  to:"us_eq",  label:"금리인하 기대", tier:"xl", amounts:[460,440,400,370,320,280,260,290,340,390,430,480] },
+      { from:"usd",    to:"crypto", label:"리스크온", tier:"xl", amounts:[350,380,420,390,340,280,230,260,310,360,400,440] },
+      { from:"asia",   to:"us_eq",  label:"달러 강세", tier:"lg", amounts:[300,290,270,250,230,200,190,210,250,270,290,310] },
+      { from:"usd",    to:"us_eq",  label:"AI 붐", tier:"lg", amounts:[240,260,290,310,330,300,270,280,310,340,320,290] },
+      { from:"eu_eq",  to:"us_eq",  label:"성장 격차", tier:"lg", amounts:[200,195,185,175,165,150,140,155,170,185,195,205] },
+      { from:"asia",   to:"gold",   label:"지정학 헤지", tier:"lg", amounts:[160,170,190,210,200,185,175,180,200,220,195,170] },
+      { from:"eu_eq",  to:"bonds",  label:"ECB 완화", tier:"md", amounts:[150,145,135,125,120,115,110,115,125,135,145,155] },
+      { from:"bonds",  to:"usd",    label:"안전자산", tier:"md", amounts:[140,135,120,110,100,120,140,130,115,105,120,145] },
+      { from:"crypto", to:"us_eq",  label:"기관 순환", tier:"md", amounts:[100,110,130,150,140,120,100,110,130,160,170,150] },
+      { from:"kr_eq",  to:"usd",    label:"외국인 순매도", tier:"sm", amounts:[90,85,80,75,70,65,60,65,75,80,85,90] },
+      { from:"usd",    to:"gold",   label:"인플레 헤지", tier:"sm", amounts:[70,72,75,80,85,90,88,82,78,74,70,68] },
+      { from:"comm",   to:"asia",   label:"원자재 수요", tier:"sm", amounts:[60,62,65,70,72,68,64,66,70,72,68,62] },
     ];
 
     const NODES = [
@@ -163,8 +139,7 @@
         return `${x},${y}`;
       }).join(" ");
       const last = data[data.length-1], first = data[0];
-      const up = last >= first;
-      const lineColor = up ? "#00e676" : "#ff1744";
+      const lineColor = last >= first ? "#00e676" : "#ff1744";
       return (
         <svg width={width} height={height} style={{display:"block"}}>
           <polyline points={pts} fill="none" stroke={lineColor} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
@@ -370,13 +345,54 @@
                           </div>
                           <div style={{display:"flex", justifyContent:"space-between", marginTop:3}}>
                             {MONTHS.map((m,i)=>(
-                              <span key={i} style={{flex:1, fontSize:7.5, color:i===monthIdx?tc:C.muted, textAlign:"center"}}>{m.replace("월","")}</span>
+                              <span key={i} style={{flex:1, fontSize:7.5, color:i===monthIdx?tc:C.muted, textAlign:"center", cursor:"pointer"}} onClick={()=>{setMonthIdx(i);setFlowTab("map");}}>{m.replace("월","")}</span>
                             ))}
                           </div>
                         </div>
                       );
                     })}
                   </div>
+                </div>
+              )}
+              {flowTab === "table" && (
+                <div style={{height:520, overflowY:"auto"}}>
+                  <table style={{width:"100%", borderCollapse:"collapse", fontFamily:"JetBrains Mono", fontSize:10}}>
+                    <thead>
+                      <tr style={{background:"#080d18", borderBottom:`1px solid ${C.border}`}}>
+                        <th style={{padding:"8px 12px", textAlign:"left", color:C.muted, fontSize:9, fontWeight:700}}>자금 흐름 경로</th>
+                        {MONTHS.map((m,i)=>(
+                          <th key={i} style={{padding:"8px 6px", textAlign:"right", color:i===monthIdx?C.accent:C.muted, fontSize:9, fontWeight:i===monthIdx?700:400, minWidth:48}}> {m.replace("월","")} </th>
+                        ))}
+                        <th style={{padding:"8px 10px", textAlign:"right", color:C.gold, fontSize:9, fontWeight:700}}>평균</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...edges].sort((a,b)=>b.amount-a.amount).map((e,idx)=>{
+                        const f=NODES.find(n=>n.id===e.from), t=NODES.find(n=>n.id===e.to);
+                        const avg=Math.round(e.amounts.reduce((s,v)=>s+v,0)/12);
+                        return (
+                          <tr key={`${e.from}-${e.to}`} style={{borderBottom:`1px solid ${C.border}33`, background:idx%2===0?C.panel:C.bg}}>
+                            <td style={{padding:"7px 12px"}}>
+                              <span style={{color:f?.color, fontWeight:700}}>{f?.label}</span>
+                              <span style={{color:C.muted}}> → </span>
+                              <span style={{color:t?.color || C.text}}>{t?.label}</span>
+                            </td>
+                            {e.amounts.map((v,i)=>{
+                              const isCurrent=i===monthIdx;
+                              const isHigh=v===Math.max(...e.amounts);
+                              const isLow=v===Math.min(...e.amounts);
+                              return (
+                                <td key={i} style={{padding:"7px 6px", textAlign:"right", color:isCurrent?C.accent:isHigh?C.green:isLow?C.red:C.text, background:isCurrent?`${C.accent}11`:"transparent", fontWeight:isCurrent?700:400, cursor:"pointer"}} onClick={()=>setMonthIdx(i)}>
+                                  {v}
+                                </td>
+                              );
+                            })}
+                            <td style={{padding:"7px 10px", textAlign:"right", color:C.gold, fontWeight:700}}>{avg}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
@@ -423,67 +439,49 @@
       );
     }
 
-    function CryptoLive() {
-      const [data, setData] = useState([{n:"BTC",p:85420,c:2.3},{n:"ETH",p:2180,c:1.8},{n:"USDT",p:1.0,c:0.0},{n:"XRP",p:2.18,c:-1.2},{n:"SOL",p:142.5,c:3.1}]);
-      useEffect(() => {
-        const go = async () => {
-          try {
-            const r = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,tether,ripple,solana&vs_currencies=usd&include_24hr_change=true");
-            if (!r.ok) return;
-            const d = await r.json();
-            setData([{n:"BTC", p:d.bitcoin?.usd, c:d.bitcoin?.usd_24h_change},{n:"ETH", p:d.ethereum?.usd, c:d.ethereum?.usd_24h_change},{n:"USDT", p:d.tether?.usd, c:d.tether?.usd_24h_change},{n:"XRP", p:d.ripple?.usd, c:d.ripple?.usd_24h_change},{n:"SOL", p:d.solana?.usd, c:d.solana?.usd_24h_change}]);
-          } catch {}
+    function FXWithSparkline() {
+      const [rates, setRates] = useState({KRW:1368.5,JPY:149.2,EUR:0.918,GBP:0.782,CNY:7.24,MXN:17.85,AUD:1.562,CAD:1.382});
+      const [history, setHistory] = useState({});
+      const [live, setLive] = useState(false);
+      const genHistory = (base, vol=0.03) => Array.from({length:12},(_,i)=>+(base*(1+(Math.sin(i*0.8+base))*vol)).toFixed(base>10?1:4));
+      useEffect(()=>{
+        const go = async ()=>{
+          try{
+            const r=await fetch("https://api.exchangerate-api.com/v4/latest/USD");
+            if(!r.ok)return;
+            const d=await r.json();
+            setRates({KRW:d.rates.KRW,JPY:d.rates.JPY,EUR:d.rates.EUR,GBP:d.rates.GBP,CNY:d.rates.CNY,MXN:d.rates.MXN,AUD:d.rates.AUD,CAD:d.rates.CAD});
+            setLive(true);
+          }catch{}
         };
-        go(); const iv = setInterval(go, 30000); return () => clearInterval(iv);
-      }, []);
+        go(); const iv=setInterval(go,60000); return()=>clearInterval(iv);
+      },[]);
+      useEffect(()=>{
+        if(rates.KRW!==1368.5){
+          setHistory({
+            "USD/KRW": genHistory(rates.KRW, 0.025),
+            "USD/JPY": genHistory(rates.JPY, 0.02),
+            "EUR/USD": genHistory(1/rates.EUR, 0.018),
+            "GBP/USD": genHistory(1/rates.GBP, 0.02),
+            "USD/CNY": genHistory(rates.CNY, 0.015),
+            "USD/MXN": genHistory(rates.MXN, 0.035),
+            "AUD/USD": genHistory(1/rates.AUD, 0.022),
+            "USD/CAD": genHistory(rates.CAD, 0.018),
+          });
+        }
+      },[rates]);
+      const pairs = [{p:"USD/KRW",v:rates.KRW,f:"🇺🇸🇰🇷"},{p:"USD/JPY",v:rates.JPY,f:"🇺🇸🇯🇵"},{p:"EUR/USD",v:(1/rates.EUR).toFixed(4),f:"🇪🇺🇺🇸"},{p:"GBP/USD",v:(1/rates.GBP).toFixed(4),f:"🇬🇧🇺🇸"}];
       return (
-        <div style={{ padding:"8px 10px", display:"flex", flexDirection:"column", gap:5 }}>
-          {data.map(x => (
-            <div key={x.n} style={{ display:"flex", justifyContent:"space-between", padding:"5px 8px", background:C.bg, borderRadius:4, border:`1px solid ${C.border}` }}>
-              <span style={{ color:C.gold, fontFamily:"JetBrains Mono", fontSize:10, fontWeight:700 }}>{x.n}</span>
-              <span style={{ color:C.text, fontFamily:"JetBrains Mono", fontSize:10 }}>${x.p < 10 ? x.p?.toFixed(4) : x.p?.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</span>
-              <span style={{ color:x.c>=0?C.green:C.red, fontSize:9 }}>{x.c>=0?"▲":"▼"}{Math.abs(x.c||0).toFixed(2)}%</span>
-            </div>
-          ))}
-        </div>
-      );
-    }
-
-    function FXLive() {
-      const [r, setR] = useState({KRW:1368.5,JPY:149.2,EUR:0.918,GBP:0.782,CNY:7.24,MXN:17.85});
-      useEffect(() => {
-        const go = async () => {
-          try {
-            const res = await fetch("https://api.exchangerate-api.com/v4/latest/USD");
-            if (!res.ok) return;
-            const d = await res.json();
-            setR({KRW:d.rates.KRW,JPY:d.rates.JPY,EUR:d.rates.EUR,GBP:d.rates.GBP,CNY:d.rates.CNY,MXN:d.rates.MXN});
-          } catch {}
-        };
-        go(); const iv = setInterval(go, 60000); return () => clearInterval(iv);
-      }, []);
-      const pairs = [{p:"USD/KRW",v:r.KRW,f:"🇺🇸🇰🇷"},{p:"USD/JPY",v:r.JPY,f:"🇺🇸🇯🇵"},{p:"EUR/USD",v:(1/r.EUR).toFixed(4),f:"🇪🇺🇺🇸"},{p:"GBP/USD",v:(1/r.GBP).toFixed(4),f:"🇬🇧🇺🇸"}];
-      return (
-        <div style={{ padding:"8px 10px", display:"flex", flexDirection:"column", gap:5 }}>
+        <div style={{ padding:"8px 10px", display:"flex", flexDirection:"column", gap:10 }}>
           {pairs.map(x => (
-            <div key={x.p} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"5px 8px", background:C.bg, borderRadius:4, border:`1px solid ${C.border}` }}>
-              <span style={{ fontSize:11 }}>{x.f}</span>
-              <span style={{ color:C.accent, fontFamily:"JetBrains Mono", fontSize:10, fontWeight:700 }}>{x.p}</span>
-              <span style={{ color:C.text, fontFamily:"JetBrains Mono", fontSize:10 }}>{parseFloat(x.v).toFixed(x.p.includes("KRW")?1:4)}</span>
+            <div key={x.p} style={{ background:C.bg, borderRadius:6, border:`1px solid ${C.border}`, padding:"8px 10px" }}>
+              <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4}}>
+                <span style={{fontSize:11}}>{x.f} <span style={{color:C.accent, fontWeight:700}}>{x.p}</span></span>
+                <span style={{color:C.text, fontFamily:"JetBrains Mono", fontSize:11, fontWeight:700}}>{parseFloat(x.v).toFixed(x.p.includes("KRW")?1:4)}</span>
+              </div>
+              <Sparkline data={history[x.p]} color={C.accent} width={175} height={20} />
             </div>
           ))}
-        </div>
-      );
-    }
-
-    function Box({ title, badge, children, style }) {
-      return (
-        <div style={{ background:C.panel, border:`1px solid ${C.border}`, borderRadius:6, overflow:"hidden", ...style }}>
-          <div style={{ fontFamily:"'Space Grotesk',sans-serif", fontSize:11, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase", color:C.muted, padding:"8px 12px", borderBottom:`1px solid ${C.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <span>{title}</span>
-            {badge && <span>{badge}</span>}
-          </div>
-          {children}
         </div>
       );
     }
@@ -498,38 +496,31 @@
             <span style={{ fontFamily:"Space Grotesk", fontSize:16, fontWeight:700, color:C.accent }}>MACRO TERMINAL</span>
             <span style={{ fontSize:10, color:C.muted }}>{clock.toLocaleTimeString("ko-KR",{hour12:false})}</span>
           </div>
-
           <div style={{ borderBottom:`1px solid ${C.border}`, height:46, overflow:"hidden" }}>
             <TV type="ticker-tape" height={46} opts={{
-              symbols:[
-                {proName:"FOREXCOM:SPXUSD",title:"S&P 500"},{proName:"FOREXCOM:NSXUSD",title:"NASDAQ 100"},
-                {proName:"KRX:KOSPI",title:"KOSPI"},{proName:"BITSTAMP:BTCUSD",title:"BTC/USD"},
-              ],
-              showSymbolLogo:false, displayMode:"adaptive",
+              symbols:[{proName:"FOREXCOM:SPXUSD",title:"S&P 500"},{proName:"FOREXCOM:NSXUSD",title:"NASDAQ 100"},{proName:"KRX:KOSPI",title:"KOSPI"},{proName:"BITSTAMP:BTCUSD",title:"BTC/USD"}],
+              showSymbolLogo:false, displayMode:"adaptive"
             }} />
           </div>
-
           <div style={{ padding:"12px", display:"flex", flexDirection:"column", gap:12 }}>
             <CapitalFlowHero />
-
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
-              <Box title="FX Market"><FXLive /></Box>
-              <Box title="Crypto Market"><CryptoLive /></Box>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1.2fr 1fr", gap:12 }}>
+              <Box title="FX & Trends"><FXWithSparkline /></Box>
               <Box title="Market Insight">
                 <div style={{padding:"12px", fontSize:11, lineHeight:1.6}}>
                   <div style={{color:C.accent, fontWeight:700, marginBottom:8}}>🤖 Jarvis Insight ({JARVIS_INSIGHT.date})</div>
                   <div style={{color:C.text}}>{JARVIS_INSIGHT.summary}</div>
-                  <div style={{marginTop:8, color:C.gold, fontSize:10}}>{JARVIS_INSIGHT.strategy}</div>
+                  <div style={{marginTop:10, color:C.gold, fontSize:10}}>{JARVIS_INSIGHT.strategy}</div>
                 </div>
               </Box>
+              <Box title="System Status" badge={<span style={{fontSize:9, color:C.green}}>ONLINE</span>}>
+                 <div style={{padding:"12px", display:"flex", flexDirection:"column", gap:8}}>
+                    <div style={{fontSize:10, color:C.muted}}>자금 흐름 데이터: <span style={{color:C.text}}>계절성 시뮬레이션 v2</span></div>
+                    <div style={{fontSize:10, color:C.muted}}>분석 엔진: <span style={{color:C.accent}}>Jarvis Core 3.1</span></div>
+                    <div style={{fontSize:10, color:C.muted}}>연결 상태: <span style={{color:C.green}}>정상</span></div>
+                 </div>
+              </Box>
             </div>
-
-            <Box title="Global Indices" badge={<span style={{fontSize:9, color:C.green}}>LIVE</span>}>
-              <TV type="market-overview" height={300} opts={{
-                dateRange:"1D", showChart:true,
-                tabs:[{ title:"Indices", symbols:[{s:"FOREXCOM:SPXUSD"},{s:"FOREXCOM:NSXUSD"},{s:"KRX:KOSPI"}]}]
-              }} />
-            </Box>
           </div>
         </div>
       );
