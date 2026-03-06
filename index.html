@@ -32,14 +32,17 @@ input[type=range].gold::-webkit-slider-thumb{background:#f0b429;box-shadow:0 0 8
 <script>
 var ECOS_KEY = 'ZV9F4SG308AAQ8GMQR35';
 var FSS_KEY  = '0d953c04697cc4a0da0de7d301623d1c';
+var AV_KEY   = 'E4707A6I8NXZOF6K';
 
 window.__live = {
-  loading:true, fredLive:false, ecosLive:false, fssLive:false, imfLive:false,
+  loading:true, fredLive:false, ecosLive:false, fssLive:false, imfLive:false, avLive:false,
   fred:  { fedRate:4.25, rate2y:4.18, rate10y:4.52, rate30y:4.73,
            unemployment:4.1, cpi:3.2, gdpGrowth:2.8, yields:[4.32,4.30,4.28,4.22,4.18,4.35,4.52,4.73] },
-  ecos:  { baseRate:null, bopMonthly:[], fdiInflow:[], fxReserves:null },
+  ecos:  { baseRate:null, bond10y:null, bopMonthly:[], fdiInflow:[], fxReserves:null },
   fss:   { foreignStock:[], corsBlocked:false },
   imf:   { gdp:{}, bop:{} },
+  av:    { gold:null,goldC:null, silver:null,silverC:null, wti:null,wtiC:null,
+           brent:null,brentC:null, natgas:null,natgasC:null, copper:null,copperC:null },
   lastUpdated: null,
 };
 
@@ -100,15 +103,78 @@ function loadEcos(){
     ecosFetch('722Y001','M',startYM,endYM,'0101000'),
     ecosFetch('301Y013','M',startYM,endYM,'010000000'),
     ecosFetch('062Y003','Q',(now.getFullYear()-2)+'Q1',now.getFullYear()+'Q'+(Math.ceil((now.getMonth()+1)/3))),
+    ecosFetch('817Y002','M',startYM,endYM,'010200000'),
   ]).then(function(v){
-    var bop=v[0],rate=v[1],fx=v[2],fdi=v[3],lv=window.__live;
+    var bop=v[0],rate=v[1],fx=v[2],fdi=v[3],bond=v[4],lv=window.__live;
     if(bop)lv.ecos.bopMonthly=bop.map(function(r){return{date:r.TIME,value:parseFloat(r.DATA_VALUE)};}).filter(function(r){return!isNaN(r.value);});
     if(rate&&rate.length>0)lv.ecos.baseRate=parseFloat(rate[rate.length-1].DATA_VALUE);
     if(fx&&fx.length>0)lv.ecos.fxReserves=parseFloat(fx[fx.length-1].DATA_VALUE);
     if(fdi)lv.ecos.fdiInflow=fdi.map(function(r){return{date:r.TIME,value:parseFloat(r.DATA_VALUE)};}).filter(function(r){return!isNaN(r.value);});
+    if(bond&&bond.length>0)lv.ecos.bond10y=parseFloat(bond[bond.length-1].DATA_VALUE);
     lv.ecosLive=true; lv.lastUpdated=new Date();
-    console.log('[ECOS] baseRate:'+lv.ecos.baseRate+' BOP months:'+lv.ecos.bopMonthly.length);
+    console.log('[ECOS] baseRate:'+lv.ecos.baseRate+' bond10y:'+lv.ecos.bond10y+' BOP:'+lv.ecos.bopMonthly.length);
   }).catch(function(e){console.warn('[ECOS] 전체:',e);});
+}
+
+/* ── Alpha Vantage 원자재 ── */
+function avFetch(func,symbol,field){
+  var url='https://www.alphavantage.co/query?function='+func+'&symbol='+symbol+'&interval=daily&outputsize=compact&apikey='+AV_KEY;
+  return fetch(url)
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var key=field||'Time Series (Daily)';
+      var ts=d[key]||d['Global Quote'];
+      if(!ts)return null;
+      if(d['Global Quote']){
+        return{price:parseFloat(d['Global Quote']['05. price']||0),chg:parseFloat(d['Global Quote']['10. change percent']||0)};
+      }
+      var dates=Object.keys(ts).sort().reverse();
+      if(dates.length<2)return null;
+      var cur=parseFloat(ts[dates[0]]['4. close']||ts[dates[0]]['4b. close (USD)']||0);
+      var prev=parseFloat(ts[dates[1]]['4. close']||ts[dates[1]]['4b. close (USD)']||0);
+      return{price:cur,chg:prev?((cur-prev)/prev*100):0};
+    }).catch(function(e){console.warn('[AV] '+symbol+':',e.message);return null;});
+}
+
+function loadAv(){
+  if(!AV_KEY)return;
+  Promise.all([
+    fetch('https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=GC%3DFUT&apikey='+AV_KEY).then(function(r){return r.json();}).catch(function(){return null;}),
+    fetch('https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=SI%3DFUT&apikey='+AV_KEY).then(function(r){return r.json();}).catch(function(){return null;}),
+    fetch('https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=WTI&apikey='+AV_KEY).then(function(r){return r.json();}).catch(function(){return null;}),
+    fetch('https://www.alphavantage.co/query?function=WTI&interval=daily&apikey='+AV_KEY).then(function(r){return r.json();}).catch(function(){return null;}),
+    fetch('https://www.alphavantage.co/query?function=NATURAL_GAS&interval=daily&apikey='+AV_KEY).then(function(r){return r.json();}).catch(function(){return null;}),
+    fetch('https://www.alphavantage.co/query?function=COPPER&interval=daily&apikey='+AV_KEY).then(function(r){return r.json();}).catch(function(){return null;}),
+    fetch('https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=XAUUSD&apikey='+AV_KEY).then(function(r){return r.json();}).catch(function(){return null;}),
+  ]).then(function(v){
+    var lv=window.__live.av;
+    function gq(d,fallback){
+      if(!d)return fallback;
+      var gq=d['Global Quote'];if(gq&&gq['05. price']){return{price:parseFloat(gq['05. price']),chg:parseFloat(gq['10. change percent']||0)};}
+      return fallback;
+    }
+    function series(d){
+      if(!d||!d.data)return null;
+      var rows=d.data.filter(function(r){return r.value&&r.value!='.'});
+      if(rows.length<2)return null;
+      var cur=parseFloat(rows[0].value),prev=parseFloat(rows[1].value);
+      return{price:cur,chg:prev?((cur-prev)/prev*100):0};
+    }
+    var gold=gq(v[6],null)||gq(v[0],null);
+    var silver=gq(v[1],null);
+    var wti=series(v[3]);
+    var ng=series(v[4]);
+    var cu=series(v[5]);
+    if(gold){lv.gold=gold.price;lv.goldC=gold.chg;}
+    if(silver){lv.silver=silver.price;lv.silverC=silver.chg;}
+    if(wti){lv.wti=wti.price;lv.wtiC=wti.chg;}
+    if(ng){lv.natgas=ng.price;lv.natgasC=ng.chg;}
+    if(cu){lv.copper=cu.price;lv.copperC=cu.chg;}
+    var anyLive=!!(gold||silver||wti||ng||cu);
+    window.__live.avLive=anyLive;
+    window.__live.lastUpdated=new Date();
+    console.log('[AV] gold:'+lv.gold+' wti:'+lv.wti+' ng:'+lv.natgas);
+  }).catch(function(e){console.warn('[AV] 전체:',e);});
 }
 
 function loadFss(){
@@ -159,8 +225,8 @@ function loadImf(){
   });
 }
 
-loadFred(); loadEcos(); loadFss(); loadImf();
-setInterval(loadFred,300000); setInterval(loadEcos,600000);
+loadFred(); loadEcos(); loadFss(); loadImf(); loadAv();
+setInterval(loadFred,300000); setInterval(loadEcos,600000); setInterval(loadAv,900000);
 </script>
 
 <script type="text/babel">
@@ -293,24 +359,6 @@ const ARB_DATA=[
   {name:"원달러 캐리",       en:"KRW Carry Return",    value:2.75,threshold:2.0,unit:"%",  dir:"up",  desc:"금리차 기반 캐리 수익 (연율)",         color:"#00e676",type:"fx"},
 ];
 
-const WORLD_PATHS=[
-  {d:"M 65,72 L 90,58 L 115,55 L 145,60 L 175,68 L 190,75 L 210,80 L 230,90 L 250,100 L 255,115 L 248,130 L 238,145 L 222,165 L 205,185 L 195,205 L 185,215 L 170,222 L 155,218 L 142,205 L 128,195 L 112,178 L 98,160 L 82,140 L 70,118 L 58,98 Z",color:"#1a2a40"},
-  {d:"M 185,215 L 200,218 L 215,225 L 218,235 L 208,240 L 195,230 L 185,222 Z",color:"#1a2a40"},
-  {d:"M 190,245 L 220,240 L 248,248 L 265,265 L 272,295 L 270,330 L 258,368 L 240,400 L 220,418 L 200,415 L 182,400 L 170,368 L 162,330 L 160,292 L 165,262 L 178,248 Z",color:"#1a2a40"},
-  {d:"M 235,30 L 268,25 L 290,35 L 295,55 L 278,65 L 252,68 L 232,55 Z",color:"#1a2a3a"},
-  {d:"M 430,58 L 460,52 L 490,55 L 518,62 L 535,72 L 540,88 L 528,102 L 510,112 L 490,118 L 468,115 L 448,105 L 435,90 L 428,74 Z",color:"#1a2a40"},
-  {d:"M 468,38 L 490,32 L 510,38 L 515,52 L 495,58 L 472,55 Z",color:"#1a2a3a"},
-  {d:"M 452,148 L 490,142 L 528,145 L 558,155 L 578,178 L 585,212 L 582,255 L 568,308 L 548,358 L 522,398 L 498,412 L 472,405 L 450,375 L 435,330 L 428,278 L 425,228 L 430,185 L 438,162 Z",color:"#1a2a40"},
-  {d:"M 558,148 L 592,145 L 612,158 L 615,178 L 598,195 L 572,198 L 555,185 L 548,165 Z",color:"#1a2a3a"},
-  {d:"M 538,30 L 620,22 L 720,18 L 820,22 L 880,35 L 908,55 L 900,78 L 870,92 L 830,100 L 790,105 L 750,108 L 710,105 L 670,100 L 630,95 L 590,88 L 555,78 L 535,62 Z",color:"#1a2a40"},
-  {d:"M 612,108 L 660,112 L 700,118 L 740,125 L 768,138 L 778,158 L 762,175 L 735,185 L 700,188 L 665,182 L 635,170 L 614,155 L 608,135 Z",color:"#1a2a40"},
-  {d:"M 638,158 L 668,155 L 692,162 L 700,185 L 695,215 L 678,238 L 658,242 L 638,232 L 624,208 L 620,185 L 628,168 Z",color:"#1a2a3a"},
-  {d:"M 748,168 L 778,162 L 800,172 L 808,192 L 798,208 L 772,212 L 750,202 L 740,185 Z",color:"#1a2a3a"},
-  {d:"M 762,88 L 840,85 L 878,95 L 888,115 L 872,132 L 842,138 L 808,135 L 778,125 L 758,110 Z",color:"#1a2a3a"},
-  {d:"M 878,88 L 895,85 L 905,98 L 898,112 L 882,115 L 870,102 Z",color:"#182238"},
-  {d:"M 755,298 L 820,290 L 862,298 L 882,322 L 880,358 L 858,385 L 825,398 L 788,392 L 760,370 L 745,338 L 742,312 Z",color:"#1a2a40"},
-  {d:"M 908,355 L 920,348 L 928,362 L 920,375 L 908,368 Z",color:"#182238"},
-];
 
 /* ════════════════════════════════════════════
    UTILS
@@ -393,10 +441,27 @@ function GlobalMoneyDash(){
   const [hovMarket,setHovMarket]=useState(null);
   const [hovAsset,setHovAsset]=useState(null);
 
-  // FRED 폴링
+  // FRED + AV 폴링
   useEffect(()=>{
     const iv=setInterval(()=>{
-      if(window.__live)setLive(Object.assign({},window.__live));
+      if(!window.__live)return;
+      setLive(Object.assign({},window.__live));
+      const av=window.__live.av||{};
+      if(window.__live.avLive){
+        setComms(prev=>({
+          gold:av.gold||prev.gold, silver:av.silver||prev.silver,
+          wti:av.wti||prev.wti, brent:av.brent||prev.brent,
+          natgas:av.natgas||prev.natgas, copper:av.copper||prev.copper,
+        }));
+        setAssetChg(prev=>({
+          goldC:av.goldC!=null?av.goldC:prev.goldC,
+          silverC:av.silverC!=null?av.silverC:prev.silverC,
+          wtiC:av.wtiC!=null?av.wtiC:prev.wtiC,
+          brentC:av.brentC!=null?av.brentC:prev.brentC,
+          natgasC:av.natgasC!=null?av.natgasC:prev.natgasC,
+          copperC:av.copperC!=null?av.copperC:prev.copperC,
+        }));
+      }
     },1500);
     return()=>clearInterval(iv);
   },[]);
@@ -440,7 +505,7 @@ function GlobalMoneyDash(){
   // 시장 정의 — KR/JP/CN 앞 배치
   const MARKETS=[
     {id:"kr",flag:"🇰🇷",name:"한국",en:"KOREA",     color:"#ff9800",highlight:true,
-     index:"KOSPI",   policy:ecos.baseRate||2.75,     rate10y:3.02,
+     index:"KOSPI",   policy:ecos.baseRate||2.75,     rate10y:ecos.bond10y||3.02,
      fxLabel:"USD/KRW",fxVal:fx.KRW,fxDec:0,fxInv:true,
      gdp:imfGdp.kr||2.1, cbName:"BOK", liveFlag:live.ecosLive},
     {id:"jp",flag:"🇯🇵",name:"일본",en:"JAPAN",     color:"#ef5350",highlight:true,
@@ -466,23 +531,24 @@ function GlobalMoneyDash(){
   ];
 
   // 자산 (순서: 금/은/BTC/ETH/WTI/Brent/NatGas/Copper)
+  const avLive=live.avLive||false;
   const ASSETS=[
-    {id:"gold",   label:"🥇 Gold",    val:comms.gold,   unit:"$/oz",   chg:assetChg.goldC,   color:"#ffd700",dec:0},
-    {id:"silver", label:"🥈 Silver",  val:comms.silver, unit:"$/oz",   chg:assetChg.silverC, color:"#c0c0c0",dec:2},
+    {id:"gold",   label:"🥇 Gold",    val:comms.gold,   unit:"$/oz",   chg:assetChg.goldC,   color:"#ffd700",dec:0,live:avLive},
+    {id:"silver", label:"🥈 Silver",  val:comms.silver, unit:"$/oz",   chg:assetChg.silverC, color:"#c0c0c0",dec:2,live:avLive},
     {id:"btc",    label:"₿ Bitcoin",  val:crypto.BTC,   unit:"USD",    chg:crypto.btcC,      color:"#ff9800",dec:0,live:crypto.btcLive},
     {id:"eth",    label:"Ξ Ethereum", val:crypto.ETH,   unit:"USD",    chg:crypto.ethC,      color:"#7c6af5",dec:0,live:crypto.btcLive},
-    {id:"wti",    label:"🛢️ WTI",    val:comms.wti,    unit:"$/bbl",  chg:assetChg.wtiC,    color:"#ff7043",dec:2},
-    {id:"brent",  label:"⛽ Brent",   val:comms.brent,  unit:"$/bbl",  chg:assetChg.brentC,  color:"#ff9800",dec:2},
-    {id:"natgas", label:"⚡ NatGas",  val:comms.natgas, unit:"$/MMBtu",chg:assetChg.natgasC, color:"#4caf50",dec:2},
-    {id:"copper", label:"🔩 Copper",  val:comms.copper, unit:"$/lb",   chg:assetChg.copperC, color:"#b87333",dec:2},
+    {id:"wti",    label:"🛢️ WTI",    val:comms.wti,    unit:"$/bbl",  chg:assetChg.wtiC,    color:"#ff7043",dec:2,live:avLive},
+    {id:"brent",  label:"⛽ Brent",   val:comms.brent,  unit:"$/bbl",  chg:assetChg.brentC,  color:"#ff9800",dec:2,live:avLive},
+    {id:"natgas", label:"⚡ NatGas",  val:comms.natgas, unit:"$/MMBtu",chg:assetChg.natgasC, color:"#4caf50",dec:2,live:avLive},
+    {id:"copper", label:"🔩 Copper",  val:comms.copper, unit:"$/lb",   chg:assetChg.copperC, color:"#b87333",dec:2,live:avLive},
   ];
 
   // 금리 비교 미니 바
   const RATE_COMP=[
-    {id:"kr",flag:"🇰🇷",cbr:ecos.baseRate||2.75,y10:3.02,color:"#ff9800"},
+    {id:"kr",flag:"🇰🇷",cbr:ecos.baseRate||2.75,y10:ecos.bond10y||3.02,color:"#ff9800",live:live.ecosLive},
     {id:"jp",flag:"🇯🇵",cbr:0.50,y10:0.72,color:"#ef5350"},
     {id:"cn",flag:"🇨🇳",cbr:3.10,y10:2.30,color:"#ff7043"},
-    {id:"us",flag:"🇺🇸",cbr:fred.fedRate||4.25,y10:fred.rate10y||4.52,color:"#00d4ff"},
+    {id:"us",flag:"🇺🇸",cbr:fred.fedRate||4.25,y10:fred.rate10y||4.52,color:"#00d4ff",live:live.fredLive},
     {id:"eu",flag:"🇪🇺",cbr:2.65,y10:2.65,color:"#7c6af5"},
     {id:"gb",flag:"🇬🇧",cbr:5.00,y10:4.15,color:"#26c6da"},
   ];
@@ -503,6 +569,7 @@ function GlobalMoneyDash(){
           {crypto.btcLive&&<span style={{color:C.orange,padding:"1px 6px",border:`1px solid ${C.orange}44`,borderRadius:2}}>● CRYPTO</span>}
           {live.fredLive&&<span style={{color:C.accent,padding:"1px 6px",border:`1px solid ${C.accent}44`,borderRadius:2}}>● FRED</span>}
           {live.ecosLive&&<span style={{color:C.gold,padding:"1px 6px",border:`1px solid ${C.gold}44`,borderRadius:2}}>● ECOS</span>}
+          {live.avLive&&<span style={{color:"#ffd700",padding:"1px 6px",border:`1px solid #ffd70044`,borderRadius:2}}>● AV 원자재</span>}
           {live.fssLive&&<span style={{color:"#26c6da",padding:"1px 6px",border:`1px solid #26c6da44`,borderRadius:2}}>● FSS</span>}
         </div>
       </div>
@@ -1047,94 +1114,148 @@ function CapitalFlowHero(){
             <svg width="100%" height="100%" style={{display:"block"}} viewBox="0 0 1000 520" preserveAspectRatio="xMidYMid meet">
               <defs>
                 <filter id="glow"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-                <filter id="glow-xl"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-                <radialGradient id="bggrad" cx="50%" cy="50%" r="70%">
-                  <stop offset="0%" stopColor="#0a1628" stopOpacity="1"/>
-                  <stop offset="100%" stopColor="#060810" stopOpacity="1"/>
+                <filter id="glow-xl"><feGaussianBlur stdDeviation="9" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                <filter id="glow-node"><feGaussianBlur stdDeviation="12" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                <radialGradient id="bggrad" cx="50%" cy="45%" r="65%">
+                  <stop offset="0%" stopColor="#091528" stopOpacity="1"/>
+                  <stop offset="100%" stopColor="#040608" stopOpacity="1"/>
                 </radialGradient>
-                <filter id="mapshadow"><feGaussianBlur stdDeviation="2" in="SourceAlpha" result="b"/><feOffset dx="1" dy="1"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                <pattern id="hexgrid" x="0" y="0" width="56" height="48" patternUnits="userSpaceOnUse">
+                  <polygon points="28,1 54,14 54,34 28,47 2,34 2,14" fill="none" stroke="#0d2040" strokeWidth="0.6" opacity="0.7"/>
+                </pattern>
+                <pattern id="dotgrid" x="0" y="0" width="30" height="30" patternUnits="userSpaceOnUse">
+                  <circle cx="15" cy="15" r="0.8" fill="#152535" opacity="0.9"/>
+                </pattern>
               </defs>
+
+              {/* 배경 */}
               <rect width="1000" height="520" fill="url(#bggrad)"/>
-              {[100,200,300,400,500,600,700,800,900].map(v=>(
-                <line key={`h${v}`} x1={v} y1="0" x2={v} y2="520" stroke="#0d1f35" strokeWidth="0.5"/>
-              ))}
-              {[100,200,300,400,500].map(v=>(
-                <line key={`v${v}`} x1="0" y1={v} x2="1000" y2={v} stroke="#0d1f35" strokeWidth="0.5"/>
-              ))}
-              {WORLD_PATHS.map((p,i)=>(
-                <path key={i} d={p.d} fill={p.color} stroke="#243555" strokeWidth="0.8" opacity="0.85" filter="url(#mapshadow)"/>
-              ))}
-              <line x1="0" y1="260" x2="1000" y2="260" stroke="#1a3050" strokeWidth="0.8" strokeDasharray="6 6" opacity="0.5"/>
-              <line x1="500" y1="0" x2="500" y2="520" stroke="#1a3050" strokeWidth="0.5" strokeDasharray="4 8" opacity="0.35"/>
+              <rect width="1000" height="520" fill="url(#hexgrid)" opacity="0.55"/>
+              <rect width="1000" height="520" fill="url(#dotgrid)" opacity="0.4"/>
+
+              {/* 앰비언트 글로우 - 노드 뒤 */}
+              {NODES.map(nd=>{
+                const px=nd.x*1000,py=nd.y*520;
+                return(
+                  <circle key={"amb-"+nd.id} cx={px} cy={py} r={nd.r*2.2}
+                    fill={nd.color} opacity="0.025" filter="url(#glow-node)"/>
+                );
+              })}
+
+              {/* 섹터 구분선 (미세 방사형) */}
+              {[0,60,120,180,240,300].map((deg,i)=>{
+                const rad=deg*Math.PI/180;
+                return <line key={i} x1={500} y1={260}
+                  x2={500+Math.cos(rad)*600} y2={260+Math.sin(rad)*380}
+                  stroke="#0d2236" strokeWidth="0.5" strokeDasharray="4 12" opacity="0.45"/>;
+              })}
+
+              {/* 에지 (곡선 화살표) */}
               {edges.map(e=>{
                 const f=NODES.find(n=>n.id===e.from),t=NODES.find(n=>n.id===e.to);
                 if(!f||!t)return null;
                 const cfg=TIER_CFG[e.tier],tc=TIER_COLORS[e.tier];
                 const x1=f.x*1000,y1=f.y*520,x2=t.x*1000,y2=t.y*520;
-                const mx=(x1+x2)/2+(y2-y1)*0.18,my=(y1+y2)/2-(x2-x1)*0.18;
-                const d=`M${x1},${y1} Q${mx},${my} ${x2},${y2}`;
+                const dx=x2-x1,dy=y2-y1;
+                const mx=x1+dx*0.5+dy*0.22,my=y1+dy*0.5-dx*0.22;
+                const path=`M${x1},${y1} Q${mx},${my} ${x2},${y2}`;
                 const isH=hoveredEdge===`${e.from}-${e.to}`;
-                const sw=cfg.strokeW*(0.5+e.w*1.2)*(isH?2:1);
+                const sw=cfg.strokeW*(0.6+e.w*1.1)*(isH?2.2:1);
                 return(
                   <g key={`${e.from}-${e.to}`}
                     onMouseEnter={()=>setHoveredEdge(`${e.from}-${e.to}`)}
                     onMouseLeave={()=>setHoveredEdge(null)} style={{cursor:"pointer"}}>
-                    {(e.tier==="xl"||isH)&&<path d={d} stroke={tc} strokeWidth={sw*3.5} strokeOpacity={0.07} fill="none" filter="url(#glow-xl)"/>}
-                    <path d={d} stroke={isH?tc:f.color} strokeWidth={sw}
-                      strokeOpacity={isH?0.95:0.28+e.w*0.42} fill="none"
-                      strokeDasharray={e.tier==="xl"?"none":e.tier==="lg"?"12 4":"7 6"}/>
-                    <text x={mx} y={my} textAnchor="middle" dy="-8" fill={tc}
-                      fontSize={isH?cfg.labelSz+2:cfg.labelSz} fontWeight="700"
-                      fontFamily="JetBrains Mono,monospace" opacity={isH?1:0.85}
-                      filter={e.tier==="xl"||isH?"url(#glow)":"none"}>
-                      {period==="1D"?`$${Math.round(e.amount*1000/30)}M`:fmt(e.amount)}
+                    {/* 글로우 레이어 */}
+                    <path d={path} stroke={tc} strokeWidth={sw*4} strokeOpacity={isH?0.12:0.04} fill="none" filter="url(#glow-xl)"/>
+                    {/* 실선 */}
+                    <path d={path} stroke={isH?tc:f.color} strokeWidth={sw}
+                      strokeOpacity={isH?1:0.32+e.w*0.45} fill="none"
+                      strokeDasharray={e.tier==="xl"?"none":e.tier==="lg"?"14 4":"8 6"}
+                      strokeLinecap="round"/>
+                    {/* 금액 라벨 */}
+                    <text x={mx} y={my-10} textAnchor="middle" fill={tc}
+                      fontSize={isH?cfg.labelSz+1.5:cfg.labelSz} fontWeight="700"
+                      fontFamily="JetBrains Mono,monospace"
+                      opacity={isH?1:e.tier==="xl"?0.92:0.75}
+                      filter={isH||e.tier==="xl"?"url(#glow)":"none"}>
+                      {fmt(e.amount)}
                     </text>
-                    {isH&&<text x={mx} y={my} textAnchor="middle" dy="6" fill="#fff" fontSize="9" fontFamily="JetBrains Mono,monospace" opacity="0.75">{e.label}</text>}
+                    {/* hover 시 라벨 */}
+                    {isH&&(
+                      <g>
+                        <rect x={mx-45} y={my+2} width={90} height={14} rx="3" fill="#060810" opacity="0.85"/>
+                        <text x={mx} y={my+13} textAnchor="middle" fill="#ccdde8" fontSize="8.5" fontFamily="JetBrains Mono,monospace">{e.label}</text>
+                      </g>
+                    )}
                   </g>
                 );
               })}
+
+              {/* 파티클 */}
               {particles.current.map(p=>{
                 const f=NODES.find(n=>n.id===p.from),t=NODES.find(n=>n.id===p.to);
                 if(!f||!t)return null;
                 return <Particle key={p.id} from={{x:f.x,y:f.y}} to={{x:t.x,y:t.y}} speed={p.speed} color={p.color} maxR={p.maxR} opacity={p.opacity}/>;
               })}
+
+              {/* 노드 */}
               {NODES.map(nd=>{
                 const px=nd.x*1000,py=nd.y*520;
-                const pulse=Math.sin(tick*0.06+nd.x*8)*0.1+0.9;
+                const pulse=Math.sin(tick*0.055+nd.x*7)*0.1+0.9;
                 const inF=edges.filter(e=>e.to===nd.id).reduce((s,e)=>s+e.amount,0);
                 const outF=edges.filter(e=>e.from===nd.id).reduce((s,e)=>s+e.amount,0);
-                const net=inF-outF,nc=net>30?C.green:net<-30?C.red:nd.color;
+                const net=inF-outF;
+                const nc=net>30?C.green:net<-30?C.red:nd.color;
+                const R=nd.r*0.52;
                 return(
                   <g key={nd.id}>
-                    <circle cx={px} cy={py} r={nd.r*pulse*1.1} fill={nd.color} opacity="0.04"/>
-                    <circle cx={px} cy={py} r={nd.r*0.68} fill={nd.color} opacity="0.08" filter="url(#glow)"/>
-                    <circle cx={px} cy={py} r={nd.r*0.44} fill="#080d18" stroke={nd.color} strokeWidth="2" strokeOpacity="0.82"/>
-                    <circle cx={px} cy={py} r={nd.r*0.52} fill="none" stroke={nc} strokeWidth="2.5" strokeOpacity="0.38" strokeDasharray={`${Math.abs(net)/8} 4`}/>
-                    <text x={px} y={py} textAnchor="middle" dy="-5" fill={nd.color} fontSize="11" fontWeight="700" fontFamily="JetBrains Mono,monospace">{nd.label}</text>
-                    <text x={px} y={py} textAnchor="middle" dy="7" fill={nd.color} fontSize="8" opacity="0.55" fontFamily="JetBrains Mono,monospace">{nd.en}</text>
-                    <text x={px} y={py} textAnchor="middle" dy="18" fill={nc} fontSize="9" fontWeight="700" fontFamily="JetBrains Mono,monospace" opacity="0.9">
-                      {net>0?`+${net}B`:net<0?`${net}B`:""}
+                    {/* 외곽 pulse 링 */}
+                    <circle cx={px} cy={py} r={R*pulse*2.0} fill={nd.color} opacity="0.03"/>
+                    <circle cx={px} cy={py} r={R*1.35} fill={nd.color} opacity="0.06" filter="url(#glow)"/>
+                    {/* 흐름 방향 호 */}
+                    <circle cx={px} cy={py} r={R*1.6} fill="none" stroke={nc} strokeWidth="2"
+                      strokeOpacity="0.4" strokeDasharray={`${Math.max(4,Math.abs(net)/6)} 6`}/>
+                    {/* 노드 본체 */}
+                    <circle cx={px} cy={py} r={R} fill="#080e1c" stroke={nd.color} strokeWidth="2.5" strokeOpacity="0.9"/>
+                    {/* 내부 채움 */}
+                    <circle cx={px} cy={py} r={R*0.62} fill={nd.color} opacity="0.14"/>
+                    {/* 아이콘/텍스트 */}
+                    <text x={px} y={py-6} textAnchor="middle" fill={nd.color}
+                      fontSize="12" fontWeight="700" fontFamily="JetBrains Mono,monospace"
+                      filter="url(#glow)">{nd.label}</text>
+                    <text x={px} y={py+7} textAnchor="middle" fill={nd.color}
+                      fontSize="8" opacity="0.6" fontFamily="JetBrains Mono,monospace">{nd.en}</text>
+                    {/* net flow */}
+                    <text x={px} y={py+19} textAnchor="middle" fill={nc}
+                      fontSize="9.5" fontWeight="700" fontFamily="JetBrains Mono,monospace" opacity="0.95">
+                      {net>0?`▲$${net}B`:net<0?`▼$${Math.abs(net)}B`:""}
                     </text>
                   </g>
                 );
               })}
-              <rect x="8" y="8" width="125" height="92" rx="5" fill="#06090f" opacity="0.9"/>
-              <text x="16" y="22" fill={C.muted} fontSize="9" fontFamily="JetBrains Mono,monospace" fontWeight="700">자금 규모</text>
+
+              {/* 범례 패널 */}
+              <rect x="8" y="8" width="130" height="98" rx="6" fill="#04080f" stroke="#1c2840" strokeWidth="1" opacity="0.95"/>
+              <text x="16" y="24" fill={C.muted} fontSize="9" fontFamily="JetBrains Mono,monospace" fontWeight="700" letterSpacing="1">자금 규모</text>
               {Object.entries(TIER_CFG).map(([tier,cfg],i)=>{
                 const tc=TIER_COLORS[tier];
                 const ranges={xl:">$300B",lg:"$150-300B",md:"$80-150B",sm:"<$80B"};
                 return(
-                  <g key={tier} transform={`translate(12,${30+i*17})`}>
-                    <circle r={cfg.maxR*0.7} cx="7" cy="4" fill={tc} opacity="0.9"/>
-                    <line x1="16" y1="4" x2="34" y2="4" stroke={tc} strokeWidth={cfg.strokeW*0.8} opacity="0.75"/>
-                    <text x="38" y="8" fill={tc} fontSize="9" fontFamily="JetBrains Mono,monospace">{ranges[tier]}</text>
+                  <g key={tier} transform={`translate(13,${33+i*18})`}>
+                    <circle r={cfg.maxR*0.75} cx="7" cy="4" fill={tc} opacity="0.9" filter="url(#glow)"/>
+                    <line x1="16" y1="4" x2="36" y2="4" stroke={tc} strokeWidth={cfg.strokeW*0.85} opacity="0.8"/>
+                    <text x="40" y="8" fill={tc} fontSize="9.5" fontFamily="JetBrains Mono,monospace">{ranges[tier]}</text>
                   </g>
                 );
               })}
-              <rect x="840" y="8" width="152" height="28" rx="4" fill="#06090f" opacity="0.9"/>
-              <text x="916" y="26" textAnchor="middle" fill={C.gold} fontSize="11" fontWeight="700" fontFamily="JetBrains Mono,monospace">{curMo.label} · {periodLabel[period]}</text>
+
+              {/* 날짜 뱃지 */}
+              <rect x="830" y="8" width="162" height="30" rx="5" fill="#04080f" stroke="#1c2840" strokeWidth="1" opacity="0.95"/>
+              <text x="911" y="27" textAnchor="middle" fill={C.gold} fontSize="12" fontWeight="700" fontFamily="JetBrains Mono,monospace">{curMo.label} · {periodLabel[period]}</text>
             </svg>
           </div>
+
+          {/* 사이드 패널 */}
           <div style={{width:215,borderLeft:`1px solid ${C.border}`,overflowY:"auto",background:C.panel2,padding:"10px 8px"}}>
             <div style={{fontSize:10,color:C.muted,fontFamily:"JetBrains Mono",fontWeight:700,letterSpacing:"0.1em",marginBottom:8}}>
               TOP FLOWS · {curMo.label}
@@ -1145,7 +1266,10 @@ function CapitalFlowHero(){
               const prevAmt=e.amounts[(moIdx+MONTHS.length-1)%MONTHS.length];
               const delta=e.amounts[moIdx]-prevAmt;
               return(
-                <div key={`${e.from}-${e.to}`} style={{marginBottom:7,padding:"7px 8px",background:C.panel,borderRadius:5,border:`1px solid ${tc}33`}}>
+                <div key={`${e.from}-${e.to}`} style={{marginBottom:7,padding:"7px 8px",background:C.panel,borderRadius:5,
+                  border:`1px solid ${tc}33`,cursor:"pointer",transition:"border-color .15s"}}
+                  onMouseEnter={()=>setHoveredEdge(`${e.from}-${e.to}`)}
+                  onMouseLeave={()=>setHoveredEdge(null)}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
                     <span style={{fontSize:9,color:f&&f.color,fontFamily:"JetBrains Mono",fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:130}}>
                       {i+1}. {f&&f.label}→{t&&t.label}
@@ -1353,20 +1477,32 @@ function ArbitragePanel(){
     return()=>clearInterval(iv);
   },[]);
 
-  // FRED 실데이터 반영: 미-한 금리차, 미-일 금리차
+  // FRED + ECOS 실데이터 반영: 금리차 전부 live 계산
   const liveArb=ARB_DATA.map(a=>{
     const fred=live.fred||{};
-    if(a.name==="미-한 금리차"&&fred.rate10y&&live.fredLive){
-      return Object.assign({},a,{value:+(fred.rate10y-3.02).toFixed(2),
-        desc:`US 10Y(${fred.rate10y}%) - KR 10Y(3.02%)`,live:true});
+    const ecos=live.ecos||{};
+    const av=live.av||{};
+    const usT=fred.rate10y;
+    const krT=ecos.bond10y;  // ECOS 실데이터
+    if(a.name==="미-한 금리차"&&usT&&krT){
+      const v=+(usT-krT).toFixed(2);
+      return Object.assign({},a,{value:v,desc:`US 10Y(${usT}%) - KR 10Y(${krT}%)`,live:true});
     }
-    if(a.name==="미-일 금리차"&&fred.rate10y&&live.fredLive){
-      return Object.assign({},a,{value:+(fred.rate10y-0.72).toFixed(2),
-        desc:`US 10Y(${fred.rate10y}%) - JP 10Y(0.72%)`,live:true});
+    if(a.name==="미-일 금리차"&&usT&&live.fredLive){
+      const v=+(usT-0.72).toFixed(2);
+      return Object.assign({},a,{value:v,desc:`US 10Y(${usT}%) - JP 10Y(0.72%)`,live:true});
     }
-    if(a.name==="미-유 금리차"&&fred.rate10y&&live.fredLive){
-      return Object.assign({},a,{value:+(fred.rate10y-2.65).toFixed(2),
-        desc:`US 10Y(${fred.rate10y}%) - EU 10Y(2.65%)`,live:true});
+    if(a.name==="미-유 금리차"&&usT&&live.fredLive){
+      const v=+(usT-2.65).toFixed(2);
+      return Object.assign({},a,{value:v,desc:`US 10Y(${usT}%) - EU 10Y(2.65%)`,live:true});
+    }
+    if(a.name==="금/은 비율"&&av.gold&&av.silver&&av.gold>0&&av.silver>0){
+      const v=+(av.gold/av.silver).toFixed(1);
+      return Object.assign({},a,{value:v,desc:`Gold($${av.gold?.toFixed(0)}) / Silver($${av.silver?.toFixed(2)})`,live:true});
+    }
+    if(a.name==="원달러 캐리"&&krT&&usT){
+      const v=+(krT-usT+fred.fedRate||0).toFixed(2);
+      return Object.assign({},a,{value:Math.abs(v),live:live.ecosLive&&live.fredLive});
     }
     return a;
   });
@@ -1379,7 +1515,8 @@ function ArbitragePanel(){
           <div style={{width:3,height:18,background:C.gold,borderRadius:2}}/>
           <span style={{fontFamily:"Space Grotesk",fontSize:11,fontWeight:700,color:C.gold,letterSpacing:"0.1em",textTransform:"uppercase"}}>아비트라지 기회</span>
           <span style={{fontSize:9,color:C.muted,fontFamily:"JetBrains Mono"}}>Cross-Market Arbitrage</span>
-          {live.fredLive&&<span style={{fontSize:7.5,color:C.green,fontFamily:"JetBrains Mono"}}>● FRED 금리 반영</span>}
+          {(live.fredLive||live.ecosLive)&&<span style={{fontSize:7.5,color:C.green,fontFamily:"JetBrains Mono"}}>● FRED+ECOS 금리차 실데이터 반영</span>}
+          {live.avLive&&<span style={{fontSize:7.5,color:"#ffd700",fontFamily:"JetBrains Mono"}}>● AV 금/은 비율 실데이터</span>}
         </div>
         <div style={{display:"flex",gap:4}}>
           {["all","rate","crypto","commodity","equity","fx"].map(t=>(
@@ -1601,8 +1738,168 @@ function LiveRatesPanel(){
 }
 
 /* ════════════════════════════════════════════
-   APP
+   🤖 AI 시장 브리핑 (Claude API)
 ════════════════════════════════════════════ */
+function AIBriefingPanel(){
+  const [brief,setBrief]=useState(null);
+  const [loading,setLoading]=useState(false);
+  const [expanded,setExpanded]=useState(false);
+  const [live,setLive]=useState(window.__live||{});
+  const [err,setErr]=useState(null);
+
+  useEffect(()=>{
+    const iv=setInterval(()=>{if(window.__live)setLive(Object.assign({},window.__live));},3000);
+    return()=>clearInterval(iv);
+  },[]);
+
+  async function runBriefing(){
+    setLoading(true);setErr(null);setBrief(null);setExpanded(true);
+    const fred=live.fred||{};
+    const ecos=live.ecos||{};
+    const av=live.av||{};
+    const imf=live.imf||{gdp:{},bop:{}};
+    const fss=live.fss||{};
+    const now=new Date();
+
+    const contextData=`
+[현재 시각] ${now.toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})} KST
+
+[미국 FRED 실데이터]
+- Fed 기준금리: ${fred.fedRate||"N/A"}%
+- 미국 2Y 국채: ${fred.rate2y||"N/A"}%
+- 미국 10Y 국채: ${fred.rate10y||"N/A"}%
+- 2Y-10Y 스프레드: ${fred.rate10y&&fred.rate2y?(fred.rate10y-fred.rate2y).toFixed(2):"N/A"}%p ${fred.rate10y&&fred.rate2y&&fred.rate10y<fred.rate2y?"(역전중⚠)":""}
+- 실업률: ${fred.unemployment||"N/A"}%
+- CPI: ${fred.cpi||"N/A"}%
+- GDP 성장률: ${fred.gdpGrowth||"N/A"}%
+
+[한국 ECOS 실데이터]
+- BOK 기준금리: ${ecos.baseRate||"N/A"}%
+- 국고채 10Y: ${ecos.bond10y||"N/A"}%
+- 미-한 금리차: ${fred.rate10y&&ecos.bond10y?(fred.rate10y-ecos.bond10y).toFixed(2):"N/A"}%p
+- 외환보유액: ${ecos.fxReserves||"N/A"}억$
+- 경상수지(최신): ${ecos.bopMonthly&&ecos.bopMonthly.length>0?ecos.bopMonthly[ecos.bopMonthly.length-1].value+"억$":"N/A"}
+
+[Alpha Vantage 원자재]
+- Gold: $${av.gold||"N/A"}/oz (${av.goldC!=null?(av.goldC>0?"+":"")+av.goldC?.toFixed(2)+"%":"N/A"})
+- WTI: $${av.wti||"N/A"}/bbl (${av.wtiC!=null?(av.wtiC>0?"+":"")+av.wtiC?.toFixed(2)+"%":"N/A"})
+- NatGas: $${av.natgas||"N/A"}/MMBtu (${av.natgasC!=null?(av.natgasC>0?"+":"")+av.natgasC?.toFixed(2)+"%":"N/A"})
+- Gold/Silver 비율: ${av.gold&&av.silver?(av.gold/av.silver).toFixed(1)+"x":"N/A"}
+
+[IMF GDP 성장률 2024]
+- 한국: ${imf.gdp.kr||"N/A"}% / 미국: ${imf.gdp.us||"N/A"}% / 중국: ${imf.gdp.cn||"N/A"}% / 일본: ${imf.gdp.jp||"N/A"}%
+
+[FSS 외국인 투자 (최신)]
+${fss.foreignStock&&fss.foreignStock.length>0?fss.foreignStock.slice(-3).map(m=>`- ${m.date}: 주식 ${m.stockNet}억 / 채권 ${m.bondNet}억`).join("\n"):"데이터 로드 중"}
+`;
+
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514",
+          max_tokens:1000,
+          system:"당신은 글로벌 매크로 애널리스트입니다. 주어진 실시간 데이터를 바탕으로 한국 투자자 관점에서 오늘의 시장 브리핑을 작성하세요. 반드시 한국어로 답변하세요. 포맷: ① 현재 시장 국면 (2-3줄) ② 주목할 리스크 포인트 3가지 (bullet) ③ 기회 포인트 2가지 (bullet) ④ 한줄 요약. 총 300자 내외로 간결하게.",
+          messages:[{role:"user",content:"다음 실시간 데이터를 분석해주세요:\n"+contextData}]
+        })
+      });
+      if(!res.ok){const e=await res.json();throw new Error(e.error&&e.error.message||"API 오류");}
+      const d=await res.json();
+      const txt=d.content&&d.content[0]&&d.content[0].text||"응답 없음";
+      setBrief(txt);
+    }catch(e){
+      setErr("분석 오류: "+e.message);
+    }finally{setLoading(false);}
+  }
+
+  const dataReady=live.fredLive||live.ecosLive;
+
+  return(
+    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:8,overflow:"hidden",marginBottom:0}}>
+      <div style={{padding:"9px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",
+        background:expanded?"#0a0f1c":C.panel2,borderBottom:expanded?`1px solid ${C.border}`:"none",
+        transition:"background .2s"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:3,height:22,background:C.purple,borderRadius:2}}/>
+          <span style={{fontFamily:"Space Grotesk",fontSize:13,fontWeight:700,color:C.purple,letterSpacing:"0.06em"}}>🤖 AI 시장 브리핑</span>
+          <span style={{fontSize:9,color:C.muted,fontFamily:"JetBrains Mono"}}>Claude가 실시간 데이터를 분석 · FRED+ECOS+AV</span>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          {!dataReady&&<span style={{fontSize:8,color:C.orange,fontFamily:"JetBrains Mono"}}>⚠ 데이터 로딩 중</span>}
+          {dataReady&&!loading&&(
+            <button onClick={runBriefing} style={{
+              padding:"5px 14px",borderRadius:5,border:`1px solid ${C.purple}`,
+              background:C.purple+"22",color:C.purple,fontFamily:"JetBrains Mono",
+              fontSize:10,fontWeight:700,cursor:"pointer",transition:"all .15s",
+              letterSpacing:"0.05em"
+            }}>
+              {brief?"🔄 재분석":"⚡ 지금 분석"}
+            </button>
+          )}
+          {loading&&(
+            <span style={{fontSize:10,color:C.purple,fontFamily:"JetBrains Mono",animation:"none"}}>
+              ◌ 분석 중...
+            </span>
+          )}
+          <button onClick={()=>setExpanded(e=>!e)} style={{
+            padding:"4px 10px",borderRadius:4,border:`1px solid ${C.border}`,
+            background:"transparent",color:C.muted,fontFamily:"JetBrains Mono",
+            fontSize:9,cursor:"pointer"
+          }}>{expanded?"▲ 접기":"▼ 펼치기"}</button>
+        </div>
+      </div>
+
+      {expanded&&(
+        <div style={{padding:"14px 18px"}}>
+          {!brief&&!loading&&!err&&(
+            <div style={{textAlign:"center",padding:"24px 0",color:C.dim,fontFamily:"JetBrains Mono",fontSize:11}}>
+              <div style={{fontSize:28,marginBottom:10}}>🤖</div>
+              <div>⚡ 지금 분석 버튼을 눌러 현재 시장 브리핑을 요청하세요</div>
+              <div style={{fontSize:9,color:C.dim,marginTop:6}}>
+                {dataReady
+                  ?`FRED${live.fredLive?" ✓":""} · ECOS${live.ecosLive?" ✓":""} · AV${live.avLive?" ✓":""} 데이터 사용`
+                  :"API 데이터 수신 대기 중..."}
+              </div>
+            </div>
+          )}
+          {loading&&(
+            <div style={{textAlign:"center",padding:"20px 0"}}>
+              <div style={{fontSize:26,marginBottom:8}}>⚙️</div>
+              <div style={{color:C.purple,fontFamily:"JetBrains Mono",fontSize:11}}>Claude가 실시간 데이터를 분석 중입니다...</div>
+              <div style={{fontSize:9,color:C.dim,marginTop:4}}>FRED · ECOS · AV · IMF · FSS 데이터 종합 분석</div>
+            </div>
+          )}
+          {err&&(
+            <div style={{padding:"12px 14px",background:C.red+"11",border:`1px solid ${C.red}44`,borderRadius:6,
+              color:C.red,fontFamily:"JetBrains Mono",fontSize:10}}>{err}</div>
+          )}
+          {brief&&(
+            <div style={{background:"#090e1e",border:`1px solid ${C.purple}33`,borderRadius:6,padding:"14px 16px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+                <span style={{fontSize:9,color:C.purple,fontFamily:"JetBrains Mono",fontWeight:700}}>
+                  📋 AI 분석 결과
+                </span>
+                <span style={{fontSize:8,color:C.dim,fontFamily:"JetBrains Mono"}}>
+                  {new Date().toLocaleString("ko-KR",{timeZone:"Asia/Seoul",hour:"2-digit",minute:"2-digit"})} KST
+                  {live.fredLive&&" · FRED ●"}{live.ecosLive&&" · ECOS ●"}{live.avLive&&" · AV ●"}
+                </span>
+              </div>
+              <div style={{color:C.text,fontFamily:"JetBrains Mono",fontSize:11.5,lineHeight:1.8,whiteSpace:"pre-wrap"}}>
+                {brief}
+              </div>
+              <div style={{marginTop:10,paddingTop:8,borderTop:`1px solid ${C.border}`,fontSize:8,color:C.dim,fontFamily:"JetBrains Mono"}}>
+                ⚠ AI 분석은 참고용입니다. 투자 결정 전 반드시 전문가 의견을 확인하세요.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function App(){
   const [clock,setClock]=useState(new Date());
   useEffect(()=>{const iv=setInterval(()=>setClock(new Date()),1000);return()=>clearInterval(iv);},[]);
@@ -1656,7 +1953,10 @@ function App(){
         {/* ① 글로벌 머니 무브 대시보드 */}
         <GlobalMoneyDash/>
 
-        {/* ② 자금 흐름 시각화 */}
+        {/* ② AI 시장 브리핑 */}
+        <AIBriefingPanel/>
+
+        {/* ③ 자금 흐름 시각화 */}
         <CapitalFlowHero/>
 
         {/* ③ 글로벌 증시 */}
