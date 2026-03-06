@@ -178,109 +178,81 @@ function loadAv(){
   }).catch(function(e){console.warn('[AV] 전체:',e);});
 }
 
-function parseFssData(d){
-  var items=[];
-  /* FSS 응답 구조 여러 경로 시도 */
-  if(d&&d.invtTrend&&d.invtTrend.item)       items=d.invtTrend.item;
-  else if(d&&d.list)                           items=d.list;
-  else if(Array.isArray(d))                    items=d;
-  else if(d&&d.result&&d.result.list)          items=d.result.list;
-  if(!Array.isArray(items)) items=items?[items]:[];
-  if(items.length===0)return null;
-  var monthly={};
-  items.forEach(function(row){
-    if(!row)return;
-    var dd=row.trdDd||row.baseDt||row.date||'';
-    if(!dd||dd.length<6)return;
-    var ym=String(dd).slice(0,6);
-    if(!monthly[ym])monthly[ym]={s:0,b:0};
-    var sv=parseFloat(row.stckNetBuyAmt||row.netBuyAmt||row.stockAmt||0);
-    var bv=parseFloat(row.bondNetBuyAmt||row.bondAmt||0);
-    monthly[ym].s+=isNaN(sv)?0:sv;
-    monthly[ym].b+=isNaN(bv)?0:bv;
-  });
+/* ── ECOS 외국인 증권투자 (FSS 대체 — CORS 없음) ──
+   601Y002: 외국인 주식 순매수  /  601Y003: 외국인 채권 순매수
+   단위: 억원 (실제 API 반환값)
+*/
+function loadFss(){
+  if(!ECOS_KEY)return;
+  var now=new Date();
+  var endYM=now.getFullYear()+('0'+(now.getMonth()+1)).slice(-2);
+  var startYM=(now.getFullYear()-1)+('0'+(now.getMonth()+1)).slice(-2);
+
+  Promise.all([
+    ecosFetch('601Y002','M',startYM,endYM,'0000000'),  /* 외국인 주식 순매수 */
+    ecosFetch('601Y003','M',startYM,endYM,'0000000'),  /* 외국인 채권 순매수 */
+  ]).then(function(v){
+    var stk=v[0],bnd=v[1],lv=window.__live;
+    if(!stk&&!bnd){
+      /* 두 시리즈 모두 실패 시 다른 시리즈 시도 */
+      return ecosFetch('601Y001','M',startYM,endYM,'0000000').then(function(alt){
+        if(!alt)return;
+        var monthly={};
+        alt.forEach(function(r){
+          var ym=r.TIME.replace('-','').slice(0,6);
+          if(!monthly[ym])monthly[ym]={s:0,b:0};
+          monthly[ym].s+=parseFloat(r.DATA_VALUE)||0;
+        });
+        buildFssArr(monthly,lv);
+      });
+    }
+    var monthly={};
+    (stk||[]).forEach(function(r){
+      if(!r||!r.TIME)return;
+      var ym=r.TIME.replace('-','').slice(0,6);
+      if(!monthly[ym])monthly[ym]={s:0,b:0};
+      monthly[ym].s+=parseFloat(r.DATA_VALUE)||0;
+    });
+    (bnd||[]).forEach(function(r){
+      if(!r||!r.TIME)return;
+      var ym=r.TIME.replace('-','').slice(0,6);
+      if(!monthly[ym])monthly[ym]={s:0,b:0};
+      monthly[ym].b+=parseFloat(r.DATA_VALUE)||0;
+    });
+    buildFssArr(monthly,lv);
+  }).catch(function(e){console.warn('[FSS/ECOS]:',e.message);});
+}
+
+function buildFssArr(monthly,lv){
   var arr=Object.keys(monthly).sort().map(function(ym){
     var m=monthly[ym];
     return{
       date:ym,
-      stockNet:+(m.s/100000000).toFixed(1),
-      bondNet: +(m.b/100000000).toFixed(1),
-      totalNet:+((m.s+m.b)/100000000).toFixed(1)
+      stockNet:+m.s.toFixed(1),
+      bondNet: +m.b.toFixed(1),
+      totalNet:+(m.s+m.b).toFixed(1)
     };
   }).filter(function(r){return r.stockNet!==0||r.bondNet!==0;});
-  return arr.length>0?arr:null;
-}
-
-function loadFss(){
-  if(!FSS_KEY)return;
-  var now=new Date();
-  var end=now.toISOString().slice(0,10).replace(/-/g,'');
-  var start=new Date(now.getFullYear(),now.getMonth()-6,1).toISOString().slice(0,10).replace(/-/g,'');
-  var directUrl='https://www.fss.or.kr/fss/kr/openApi/api/invtTrend.jsp'
-    +'?apiType=json&startDate='+start+'&endDate='+end+'&authKey='+FSS_KEY;
-
-  /* 프록시 우선순위 목록 — 순서대로 시도 */
-  var PROXIES=[
-    function(u){return 'https://corsproxy.io/?'+encodeURIComponent(u);},
-    function(u){return 'https://api.allorigins.win/raw?url='+encodeURIComponent(u);},
-    function(u){return 'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(u);},
-    function(u){return u;},  /* 마지막: 직접 시도 (일부 환경 허용) */
-  ];
-
-  function tryProxy(idx){
-    if(idx>=PROXIES.length){
-      console.warn('[FSS] 모든 프록시 실패 — 임시 샘플 데이터 표시');
-      /* 실데이터 연결 실패 시 샘플 폴백 (시각화 유지용) */
-      window.__live.fss.corsBlocked=true;
-      window.__live.fssLive=false;
-      return;
-    }
-    var url=PROXIES[idx](directUrl);
-    console.log('[FSS] 시도 #'+(idx+1)+': '+url.slice(0,70)+'...');
-    fetch(url,{headers:{'Accept':'application/json, text/plain, */*'}})
-      .then(function(r){
-        if(!r.ok)throw new Error('HTTP '+r.status);
-        return r.text();
-      })
-      .then(function(txt){
-        /* allorigins는 감싸진 JSON 형태일 수 있음 */
-        var raw=txt;
-        try{
-          var wrap=JSON.parse(txt);
-          if(wrap&&wrap.contents)raw=wrap.contents;
-        }catch(_){}
-        var d;
-        try{d=JSON.parse(raw);}
-        catch(e){throw new Error('JSON 파싱 실패');}
-        var arr=parseFssData(d);
-        if(!arr)throw new Error('데이터 없음');
-        window.__live.fss.foreignStock=arr;
-        window.__live.fss.corsBlocked=false;
-        window.__live.fssLive=true;
-        window.__live.lastUpdated=new Date();
-        console.log('[FSS] ✅ 프록시 #'+(idx+1)+' 성공 — '+arr.length+'개월 데이터');
-      })
-      .catch(function(e){
-        console.warn('[FSS] 프록시 #'+(idx+1)+' 실패:',e.message);
-        tryProxy(idx+1);  /* 다음 프록시 시도 */
-      });
+  if(arr.length>0){
+    lv.fss.foreignStock=arr;
+    lv.fss.corsBlocked=false;
+    lv.fssLive=true;
+    lv.lastUpdated=new Date();
+    console.log('[FSS/ECOS] ✅ '+arr.length+'개월 외국인 수급 데이터');
   }
-
-  tryProxy(0);
 }
 
-/* FSS 재시도 — 초기 로딩 후 30초 간격으로 최대 3회 */
+/* FSS 재시도 (ECOS 응답 지연 대비) */
 var _fssRetry=0;
 function scheduleFssRetry(){
-  if(_fssRetry>=3||window.__live.fssLive)return;
+  if(_fssRetry>=2||window.__live.fssLive)return;
   _fssRetry++;
   setTimeout(function(){
     if(!window.__live.fssLive){
-      console.log('[FSS] 재시도 '+_fssRetry+'/3...');
+      console.log('[FSS/ECOS] 재시도 '+_fssRetry+'/2...');
       loadFss();
-      scheduleFssRetry();
     }
-  },30000*_fssRetry);
+  },15000*_fssRetry);
 }
 
 function loadImf(){
@@ -1366,49 +1338,62 @@ function KoreaFlowTab({live}){
 function GlobalMacroTab({live}){
   const fred=live.fred||{};
   const ecos=live.ecos||{};
-  const imfGdp=(live.imf&&live.imf.gdp)||{};
-  const imfBop=(live.imf&&live.imf.bop)||{};
+  const imfGdp=((live.imf||{}).gdp)||{};
   const av=live.av||{};
 
-  /* 금리 비교 데이터 */
+  // 안전한 숫자 변환
+  const safe=function(v,fb){const n=parseFloat(v);return isNaN(n)?(fb!=null?fb:null):n;};
+  const fmt1=function(v){const n=safe(v);return n!=null?n.toFixed(1):null;};
+  const fmt2=function(v){const n=safe(v);return n!=null?n.toFixed(2):null;};
+
+  /* 금리 비교 데이터 — 모두 폴백값 포함 */
   const rateCountries=[
-    {id:"us",flag:"🇺🇸",name:"미국",   cbr:fred.fedRate||4.25,y10:fred.rate10y||4.52,col:"#00d4ff",live:live.fredLive},
-    {id:"kr",flag:"🇰🇷",name:"한국",   cbr:ecos.baseRate||2.75,y10:ecos.bond10y||3.02,col:"#ff9800",live:live.ecosLive},
+    {id:"us",flag:"🇺🇸",name:"미국",   cbr:safe(fred.fedRate,4.25), y10:safe(fred.rate10y,4.52),col:"#00d4ff",live:live.fredLive},
+    {id:"kr",flag:"🇰🇷",name:"한국",   cbr:safe(ecos.baseRate,2.75),y10:safe(ecos.bond10y,3.02),col:"#ff9800",live:live.ecosLive},
     {id:"jp",flag:"🇯🇵",name:"일본",   cbr:0.50,  y10:0.72,  col:"#ef5350"},
     {id:"cn",flag:"🇨🇳",name:"중국",   cbr:3.10,  y10:2.30,  col:"#ff7043"},
     {id:"eu",flag:"🇪🇺",name:"유로존", cbr:2.65,  y10:2.65,  col:"#7c6af5"},
     {id:"gb",flag:"🇬🇧",name:"영국",   cbr:5.00,  y10:4.15,  col:"#26c6da"},
   ];
-  const maxRate=Math.max(...rateCountries.map(r=>Math.max(r.cbr,r.y10)));
+  const maxRate=Math.max(...rateCountries.map(r=>Math.max(r.cbr||0,r.y10||0)))||6;
 
-  /* GDP 비교 */
+  /* GDP — 폴백값 내장 */
   const gdpCountries=[
-    {id:"us",flag:"🇺🇸",name:"미국",   gdp:imfGdp.us||fred.gdpGrowth||2.8,col:"#00d4ff"},
-    {id:"cn",flag:"🇨🇳",name:"중국",   gdp:imfGdp.cn||4.8,col:"#ff7043"},
-    {id:"in",flag:"🇮🇳",name:"인도",   gdp:imfGdp.in||6.5,col:"#ff9800"},
-    {id:"kr",flag:"🇰🇷",name:"한국",   gdp:imfGdp.kr||2.1,col:"#f0b429"},
-    {id:"jp",flag:"🇯🇵",name:"일본",   gdp:imfGdp.jp||0.9,col:"#ef5350"},
-    {id:"eu",flag:"🇪🇺",name:"유로존", gdp:imfGdp.eu||0.8,col:"#7c6af5"},
-    {id:"gb",flag:"🇬🇧",name:"영국",   gdp:imfGdp.gb||0.4,col:"#26c6da"},
-    {id:"au",flag:"🇦🇺",name:"호주",   gdp:imfGdp.au||1.5,col:"#4caf50"},
-    {id:"ca",flag:"🇨🇦",name:"캐나다", gdp:imfGdp.ca||1.2,col:"#8bc34a"},
-  ];
-  const maxGdp=Math.max(...gdpCountries.map(d=>Math.abs(d.gdp)));
+    {id:"us",flag:"🇺🇸",name:"미국",   gdp:safe(imfGdp.us,safe(fred.gdpGrowth,2.8)),col:"#00d4ff"},
+    {id:"cn",flag:"🇨🇳",name:"중국",   gdp:safe(imfGdp.cn,4.8),col:"#ff7043"},
+    {id:"in",flag:"🇮🇳",name:"인도",   gdp:safe(imfGdp.in,6.5),col:"#ff9800"},
+    {id:"kr",flag:"🇰🇷",name:"한국",   gdp:safe(imfGdp.kr,2.1),col:"#f0b429"},
+    {id:"jp",flag:"🇯🇵",name:"일본",   gdp:safe(imfGdp.jp,0.9),col:"#ef5350"},
+    {id:"eu",flag:"🇪🇺",name:"유로존", gdp:safe(imfGdp.eu,0.8),col:"#7c6af5"},
+    {id:"gb",flag:"🇬🇧",name:"영국",   gdp:safe(imfGdp.gb,0.4),col:"#26c6da"},
+    {id:"au",flag:"🇦🇺",name:"호주",   gdp:safe(imfGdp.au,1.5),col:"#4caf50"},
+    {id:"ca",flag:"🇨🇦",name:"캐나다", gdp:safe(imfGdp.ca,1.2),col:"#8bc34a"},
+  ].map(d=>({...d,gdp:d.gdp!=null?d.gdp:0}));
+  const maxGdp=Math.max(...gdpCountries.map(d=>Math.abs(d.gdp||0)))||6;
 
-  /* 미국 수익률 곡선 스프레드 */
-  const spread2_10=fred.rate10y&&fred.rate2y?+(fred.rate10y-fred.rate2y).toFixed(2):null;
-  const spread3m_10=fred.yields&&fred.yields[0]&&fred.rate10y?+(fred.rate10y-fred.yields[0]).toFixed(2):null;
-  const isInverted2_10=spread2_10!=null&&spread2_10<0;
-  const isInverted3m_10=spread3m_10!=null&&spread3m_10<0;
+  /* 수익률 곡선 스프레드 */
+  const r10=safe(fred.rate10y); const r2=safe(fred.rate2y);
+  const r3m=fred.yields&&fred.yields.length>0?safe(fred.yields[0]):null;
+  const spread2_10=(r10!=null&&r2!=null)?+(r10-r2).toFixed(2):null;
+  const spread3m_10=(r10!=null&&r3m!=null)?+(r10-r3m).toFixed(2):null;
 
-  /* 원자재 가격 */
+  /* 원자재 — 절대 null.toFixed() 발생 안 하도록 완전 방어 */
   const commList=[
-    {label:"Gold",     val:av.gold,  chg:av.goldC,  unit:"$/oz",   col:"#ffd700"},
-    {label:"WTI",      val:av.wti,   chg:av.wtiC,   unit:"$/bbl",  col:"#ff7043"},
-    {label:"NatGas",   val:av.natgas,chg:av.natgasC, unit:"$/MMBtu",col:"#4caf50"},
-    {label:"Copper",   val:av.copper,chg:av.copperC, unit:"$/lb",   col:"#b87333"},
-    {label:"Silver",   val:av.silver,chg:av.silverC, unit:"$/oz",   col:"#c0c0c0"},
+    {label:"Gold",   val:safe(av.gold),   chg:safe(av.goldC),   unit:"$/oz",   col:"#ffd700"},
+    {label:"WTI",    val:safe(av.wti),    chg:safe(av.wtiC),    unit:"$/bbl",  col:"#ff7043"},
+    {label:"NatGas", val:safe(av.natgas), chg:safe(av.natgasC), unit:"$/MMBtu",col:"#4caf50"},
+    {label:"Copper", val:safe(av.copper), chg:safe(av.copperC), unit:"$/lb",   col:"#b87333"},
+    {label:"Silver", val:safe(av.silver), chg:safe(av.silverC), unit:"$/oz",   col:"#c0c0c0"},
   ];
+
+  /* 거시 요약 계산 — 모두 폴백 포함 */
+  const fedR=safe(fred.fedRate,4.25);
+  const cpiV=safe(fred.cpi,3.2);
+  const krSpread=(r10!=null&&safe(ecos.bond10y)!=null)?+(r10-safe(ecos.bond10y)).toFixed(2):1.5;
+  const gdpUs=safe(imfGdp.us,safe(fred.gdpGrowth,2.8));
+  const gdpCn=safe(imfGdp.cn,4.8);
+  const goldV=safe(av.gold,2900);
+  const wtiV =safe(av.wti,68);
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
@@ -1416,47 +1401,56 @@ function GlobalMacroTab({live}){
       {/* ── 상단: 수익률 곡선 신호 + 원자재 ── */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
 
-        {/* 미국 수익률 곡선 신호 */}
+        {/* 미국 수익률 곡선 */}
         <div style={{background:C.bg,borderRadius:5,padding:"10px 14px",border:`1px solid ${C.border}`}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
             <span style={{fontSize:8.5,color:C.accent,fontFamily:"JetBrains Mono",fontWeight:700}}>📈 미국 수익률 곡선 신호</span>
             {live.fredLive&&<span style={{fontSize:7,color:C.green,fontFamily:"JetBrains Mono"}}>● FRED LIVE</span>}
           </div>
+
+          {/* 스프레드 카드 2개 */}
           <div style={{display:"flex",gap:8,marginBottom:10}}>
             {[
-              {label:"2Y-10Y",val:spread2_10,inv:isInverted2_10},
-              {label:"3M-10Y",val:spread3m_10,inv:isInverted3m_10},
-            ].map((sp,i)=>(
-              <div key={i} style={{flex:1,padding:"8px 10px",background:C.panel,borderRadius:4,
-                border:`1px solid ${sp.inv?C.red+"66":C.green+"44"}`}}>
-                <div style={{fontSize:7,color:C.dim,fontFamily:"JetBrains Mono",marginBottom:3}}>{sp.label} 스프레드</div>
-                <div style={{fontSize:16,color:sp.val==null?C.muted:sp.inv?C.red:C.green,fontWeight:700,fontFamily:"JetBrains Mono"}}>
-                  {sp.val!=null?(sp.val>=0?"+":"")+sp.val+"%p":"—"}
+              {label:"2Y-10Y",val:spread2_10},
+              {label:"3M-10Y",val:spread3m_10},
+            ].map((sp,i)=>{
+              const inv=sp.val!=null&&sp.val<0;
+              const col=sp.val==null?C.dim:inv?C.red:C.green;
+              return(
+                <div key={i} style={{flex:1,padding:"8px 10px",background:C.panel,borderRadius:4,
+                  border:`1px solid ${col}44`}}>
+                  <div style={{fontSize:7,color:C.dim,fontFamily:"JetBrains Mono",marginBottom:3}}>{sp.label} 스프레드</div>
+                  <div style={{fontSize:16,color:col,fontWeight:700,fontFamily:"JetBrains Mono"}}>
+                    {sp.val!=null?((sp.val>=0?"+":"")+sp.val+"%p"):"로딩 중"}
+                  </div>
+                  <div style={{fontSize:8,color:col,fontFamily:"JetBrains Mono",marginTop:2,fontWeight:700}}>
+                    {sp.val==null?"FRED 수신 중":inv?"⚠ 역전 中":"✓ 정상"}
+                  </div>
                 </div>
-                <div style={{fontSize:8,color:sp.inv?C.red:C.green,fontFamily:"JetBrains Mono",marginTop:2,fontWeight:700}}>
-                  {sp.val==null?"대기":sp.inv?"⚠ 역전 中":"정상"}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
+
           {/* 핵심 금리 4개 */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4}}>
             {[
-              {l:"Fed",v:fred.fedRate,c:C.accent},
-              {l:"2Y",v:fred.rate2y, c:C.gold},
-              {l:"10Y",v:fred.rate10y,c:C.green},
-              {l:"30Y",v:fred.rate30y,c:C.purple},
+              {l:"Fed",  v:safe(fred.fedRate), c:C.accent},
+              {l:"2Y",   v:safe(fred.rate2y),  c:C.gold},
+              {l:"10Y",  v:safe(fred.rate10y), c:C.green},
+              {l:"30Y",  v:safe(fred.rate30y), c:C.purple},
             ].map((r,i)=>(
               <div key={i} style={{textAlign:"center",padding:"5px 4px",background:C.panel,borderRadius:3,
                 border:`1px solid ${r.c}33`}}>
                 <div style={{fontSize:7,color:C.dim,fontFamily:"JetBrains Mono"}}>{r.l}</div>
-                <div style={{fontSize:12,color:r.c,fontWeight:700,fontFamily:"JetBrains Mono"}}>{r.v||"—"}%</div>
+                <div style={{fontSize:12,color:r.c,fontWeight:700,fontFamily:"JetBrains Mono"}}>
+                  {r.v!=null?r.v+"%":"—"}
+                </div>
               </div>
             ))}
           </div>
           <div style={{marginTop:8,fontSize:8,color:C.dim,fontFamily:"JetBrains Mono",lineHeight:1.6,
             padding:"6px 8px",background:C.panel,borderRadius:4}}>
-            {isInverted2_10
+            {spread2_10!=null&&spread2_10<0
               ?"⚠ 2Y-10Y 역전 — 과거 8/9회 경기침체 선행, 크레딧 스프레드 모니터링 필요"
               :spread2_10!=null&&spread2_10<0.3
               ?"🟡 스프레드 축소 — 정상화 진행 중, 장기채 매력 점진적 회복"
@@ -1464,81 +1458,99 @@ function GlobalMacroTab({live}){
           </div>
         </div>
 
-        {/* 원자재 가격 (AV 실데이터) */}
+        {/* 원자재 가격 */}
         <div style={{background:C.bg,borderRadius:5,padding:"10px 14px",border:`1px solid ${C.border}`}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
             <span style={{fontSize:8.5,color:C.gold,fontFamily:"JetBrains Mono",fontWeight:700}}>🛢️ 글로벌 원자재 가격</span>
-            {live.avLive&&<span style={{fontSize:7,color:"#ffd700",fontFamily:"JetBrains Mono"}}>● AV LIVE</span>}
+            <span style={{fontSize:7,color:live.avLive?C.green:C.dim,fontFamily:"JetBrains Mono"}}>
+              {live.avLive?"● AV LIVE":"○ 기본값 표시"}
+            </span>
           </div>
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          <div style={{display:"flex",flexDirection:"column",gap:7}}>
             {commList.map((cm,i)=>{
-              const isPos=cm.chg>=0;
+              const hasVal=cm.val!=null;
+              const hasChg=cm.chg!=null;
+              const isPos=hasChg&&cm.chg>=0;
+              const chgColor=hasChg?(isPos?C.green:C.red):C.dim;
+              const barPct=hasVal?Math.min(Math.max(cm.val/3000*100+15,5),95):25;
               return(
                 <div key={i} style={{display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{fontSize:8,color:cm.col,fontFamily:"JetBrains Mono",width:52,flexShrink:0,fontWeight:700}}>{cm.label}</span>
+                  <span style={{fontSize:8,color:cm.col,fontFamily:"JetBrains Mono",
+                    width:50,flexShrink:0,fontWeight:700}}>{cm.label}</span>
                   <div style={{flex:1,height:5,background:C.border,borderRadius:2,overflow:"hidden"}}>
-                    <div style={{height:"100%",background:cm.col,opacity:0.7,
-                      width:`${cm.val?Math.min(cm.val/3000*100+20,95):30}%`,borderRadius:2}}/>
+                    <div style={{height:"100%",background:cm.col,opacity:0.65,
+                      width:`${barPct}%`,borderRadius:2,transition:"width .4s"}}/>
                   </div>
-                  <span style={{fontSize:10,color:cm.col,fontFamily:"JetBrains Mono",fontWeight:700,width:70,textAlign:"right",flexShrink:0}}>
-                    {cm.val!=null?(cm.val>=100?cm.val.toFixed(0):cm.val.toFixed(2)):"—"}
-                    <span style={{fontSize:7,color:C.dim,fontWeight:400}}> {cm.unit}</span>
+                  <span style={{fontSize:10,color:cm.col,fontFamily:"JetBrains Mono",fontWeight:700,
+                    width:68,textAlign:"right",flexShrink:0}}>
+                    {hasVal
+                      ?(cm.val>=1000?cm.val.toLocaleString("en-US",{maximumFractionDigits:0})
+                        :cm.val>=100?cm.val.toFixed(1)
+                        :cm.val.toFixed(2))
+                      :"—"}
+                    <span style={{fontSize:6.5,color:C.dim,fontWeight:400}}> {cm.unit}</span>
                   </span>
-                  <span style={{fontSize:8.5,fontFamily:"JetBrains Mono",fontWeight:700,width:46,textAlign:"right",flexShrink:0,
-                    color:cm.chg!=null?(isPos?C.green:C.red):C.dim}}>
-                    {cm.chg!=null?(isPos?"▲":"▼")+Math.abs(cm.chg).toFixed(2)+"%":"—"}
+                  <span style={{fontSize:8.5,fontFamily:"JetBrains Mono",fontWeight:700,
+                    width:46,textAlign:"right",flexShrink:0,color:chgColor}}>
+                    {hasChg
+                      ?((isPos?"▲":"▼")+Math.abs(cm.chg).toFixed(2)+"%")
+                      :"—"}
                   </span>
                 </div>
               );
             })}
           </div>
-          {/* 인플레-원자재 신호 */}
           <div style={{marginTop:8,fontSize:7.5,color:C.dim,fontFamily:"JetBrains Mono",
             padding:"5px 8px",background:C.panel,borderRadius:4,lineHeight:1.6}}>
-            {av.gold>3000?"🟡 금 $3000+ — 인플레·지정학 리스크 헤지 수요 강세"
-            :av.wti>85?"🟠 고유가 — 한국 수입 물가 상승, 경상수지 압박"
-            :av.wti<60?"🟢 저유가 — 한국 에너지 수입 비용 절감, 항공·정유 수혜"
+            {goldV>3000?"🟡 금 $3000+ — 인플레·지정학 리스크 헤지 수요 강세"
+            :wtiV>85?"🟠 고유가 — 한국 수입 물가 상승, 경상수지 압박"
+            :wtiV<60?"🟢 저유가 — 에너지 수입 비용 절감, 항공·정유 수혜"
             :"🟢 원자재 전반 안정 — 인플레 재점화 리스크 제한적"}
           </div>
         </div>
       </div>
 
-      {/* ── 중단: 금리 비교 + GDP 비교 나란히 ── */}
+      {/* ── 중단: 금리 비교 + GDP 비교 ── */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
 
         {/* 6개국 금리 비교 */}
         <div style={{background:C.bg,borderRadius:5,padding:"10px 14px",border:`1px solid ${C.border}`}}>
           <div style={{fontSize:8.5,color:C.accent,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:10}}>
-            🏦 주요국 금리 비교 (정책 vs 10Y)
+            🏦 주요국 금리 비교 (정책금리 vs 10Y)
           </div>
-          {rateCountries.map((r,i)=>(
-            <div key={i} style={{marginBottom:7}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
-                <span style={{fontSize:8.5,color:r.col,fontFamily:"JetBrains Mono",fontWeight:700}}>
-                  {r.flag} {r.name}
-                  {r.live&&<span style={{fontSize:6,color:C.green,marginLeft:4}}>●</span>}
-                </span>
-                <span style={{fontSize:9,color:C.dim,fontFamily:"JetBrains Mono"}}>
-                  <span style={{color:r.col}}>{r.cbr}%</span>
-                  <span style={{color:C.dim}}> / </span>
-                  <span style={{color:C.gold}}>{r.y10}%</span>
-                </span>
-              </div>
-              <div style={{display:"flex",gap:2,alignItems:"center"}}>
-                <div style={{flex:1,height:5,background:C.border,borderRadius:2,overflow:"hidden"}}>
-                  <div style={{width:`${(r.cbr/maxRate)*100}%`,height:"100%",background:r.col,opacity:0.8,borderRadius:2}}/>
+          {rateCountries.map((r,i)=>{
+            const spread=r.y10!=null&&r.cbr!=null?+(r.y10-r.cbr).toFixed(2):null;
+            return(
+              <div key={i} style={{marginBottom:7}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                  <span style={{fontSize:8.5,color:r.col,fontFamily:"JetBrains Mono",fontWeight:700}}>
+                    {r.flag} {r.name}
+                    {r.live&&<span style={{fontSize:6,color:C.green,marginLeft:4}}>●</span>}
+                  </span>
+                  <span style={{fontSize:9,fontFamily:"JetBrains Mono"}}>
+                    <span style={{color:r.col}}>{r.cbr!=null?r.cbr+"%":"—"}</span>
+                    <span style={{color:C.dim}}> / </span>
+                    <span style={{color:C.gold}}>{r.y10!=null?r.y10+"%":"—"}</span>
+                    {spread!=null&&<span style={{color:spread>=0?C.green:C.red,marginLeft:5,fontSize:7.5}}>
+                      {spread>=0?"▲":"▼"}{Math.abs(spread)}
+                    </span>}
+                  </span>
                 </div>
-                <div style={{flex:1,height:5,background:C.border,borderRadius:2,overflow:"hidden"}}>
-                  <div style={{width:`${(r.y10/maxRate)*100}%`,height:"100%",background:C.gold,opacity:0.7,borderRadius:2}}/>
+                <div style={{display:"flex",gap:2,alignItems:"center"}}>
+                  <div style={{flex:1,height:5,background:C.border,borderRadius:2,overflow:"hidden"}}>
+                    <div style={{width:`${((r.cbr||0)/maxRate)*100}%`,height:"100%",
+                      background:r.col,opacity:0.8,borderRadius:2}}/>
+                  </div>
+                  <div style={{flex:1,height:5,background:C.border,borderRadius:2,overflow:"hidden"}}>
+                    <div style={{width:`${((r.y10||0)/maxRate)*100}%`,height:"100%",
+                      background:C.gold,opacity:0.65,borderRadius:2}}/>
+                  </div>
                 </div>
-                <span style={{fontSize:7,color:r.y10>r.cbr?C.green:C.red,marginLeft:4,fontFamily:"JetBrains Mono",width:36,textAlign:"right"}}>
-                  {r.y10>r.cbr?"▲"+(r.y10-r.cbr).toFixed(2):"▼"+(r.cbr-r.y10).toFixed(2)}
-                </span>
               </div>
-            </div>
-          ))}
-          <div style={{display:"flex",gap:12,marginTop:4,fontSize:7.5,color:C.dim,fontFamily:"JetBrains Mono"}}>
-            <span style={{color:C.muted}}>■ 정책금리</span><span style={{color:C.gold}}>■ 10Y</span>
+            );
+          })}
+          <div style={{display:"flex",gap:12,marginTop:4,fontSize:7.5,fontFamily:"JetBrains Mono"}}>
+            <span style={{color:C.muted}}>■ 정책금리</span><span style={{color:C.gold}}>■ 10Y 국채</span>
           </div>
         </div>
 
@@ -1548,27 +1560,27 @@ function GlobalMacroTab({live}){
             <span style={{fontSize:8.5,color:C.green,fontFamily:"JetBrains Mono",fontWeight:700}}>
               📊 IMF GDP 성장률 2024 (국가별)
             </span>
-            {live.imfLive&&<span style={{fontSize:7,color:C.green,fontFamily:"JetBrains Mono"}}>● IMF LIVE</span>}
+            <span style={{fontSize:7,color:live.imfLive?C.green:C.dim,fontFamily:"JetBrains Mono"}}>
+              {live.imfLive?"● IMF LIVE":"○ 추정값"}
+            </span>
           </div>
           {gdpCountries.map((g,i)=>{
-            const barW=Math.abs(g.gdp)/maxGdp*100;
-            const isPos=g.gdp>=0;
+            const barW=Math.min(Math.abs(g.gdp||0)/maxGdp*100,100);
+            const isPos=(g.gdp||0)>=0;
             return(
               <div key={i} style={{marginBottom:6,display:"flex",alignItems:"center",gap:8}}>
                 <span style={{fontSize:9,width:14,flexShrink:0}}>{g.flag}</span>
-                <span style={{fontSize:8,color:g.col,fontFamily:"JetBrains Mono",width:40,flexShrink:0,fontWeight:700}}>{g.name}</span>
-                <div style={{flex:1,height:10,background:C.border,borderRadius:2,overflow:"hidden",position:"relative"}}>
+                <span style={{fontSize:8,color:g.col,fontFamily:"JetBrains Mono",
+                  width:40,flexShrink:0,fontWeight:700}}>{g.name}</span>
+                <div style={{flex:1,height:10,background:C.border,borderRadius:2,overflow:"hidden"}}>
                   <div style={{
-                    position:"absolute",left:0,top:0,height:"100%",
-                    width:`${barW}%`,
-                    background:`linear-gradient(90deg,${g.col}99,${g.col})`,
-                    borderRadius:2,transition:"width .5s"
+                    height:"100%",width:`${barW}%`,borderRadius:2,transition:"width .5s",
+                    background:`linear-gradient(90deg,${g.col}88,${g.col})`
                   }}/>
-                  <div style={{position:"absolute",left:"50%",top:0,height:"100%",width:1,background:C.border}}/>
                 </div>
                 <span style={{fontSize:10,color:isPos?C.green:C.red,fontFamily:"JetBrains Mono",
                   fontWeight:700,width:38,textAlign:"right",flexShrink:0}}>
-                  {isPos?"+":""}{g.gdp}%
+                  {isPos?"+":""}{(g.gdp||0).toFixed(1)}%
                 </span>
               </div>
             );
@@ -1576,31 +1588,31 @@ function GlobalMacroTab({live}){
         </div>
       </div>
 
-      {/* ── 하단: 거시 종합 요약 ── */}
+      {/* ── 하단: 거시 종합 요약 카드 4개 ── */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
         {[
           {label:"Fed 긴축 국면",
-           val:fred.fedRate>4?"고금리 유지":(fred.fedRate>3?"중립":"완화"),
-           detail:`기준금리 ${fred.fedRate||"—"}% · CPI ${fred.cpi||"—"}%`,
-           color:fred.fedRate>4?C.red:fred.fedRate>3?C.gold:C.green},
+           val:fedR>4?"고금리 유지":fedR>3?"중립":"완화 전환",
+           detail:`기준금리 ${fedR}% · CPI ${cpiV}%`,
+           color:fedR>4?C.red:fedR>3?C.gold:C.green},
           {label:"한국 상대 매력",
-           val:usKrSpread!=null?(usKrSpread>2?"채권 불리":usKrSpread>1?"중립":"채권 매력"):null,
-           detail:`미-한 스프레드 ${usKrSpread!=null?usKrSpread+"%p":"—"}`,
-           color:usKrSpread!=null?(usKrSpread>2?C.red:usKrSpread>1?C.gold:C.green):C.dim},
+           val:krSpread>2?"채권 불리":krSpread>1?"중립":"채권 매력",
+           detail:`미-한 스프레드 ${krSpread}%p`,
+           color:krSpread>2?C.red:krSpread>1?C.gold:C.green},
           {label:"글로벌 성장",
-           val:imfGdp.us>2&&imfGdp.cn>4?"동반 성장":imfGdp.us>0&&imfGdp.cn>0?"완만 성장":"성장 우려",
-           detail:`미국 ${imfGdp.us||"—"}% · 중국 ${imfGdp.cn||"—"}%`,
-           color:imfGdp.us>2&&imfGdp.cn>4?C.green:imfGdp.us>0?C.gold:C.red},
+           val:gdpUs>2&&gdpCn>4?"동반 성장":gdpUs>0&&gdpCn>0?"완만 성장":"성장 우려",
+           detail:`미국 ${gdpUs!=null?gdpUs+"%":"—"} · 중국 ${gdpCn!=null?gdpCn+"%":"—"}`,
+           color:gdpUs>2&&gdpCn>4?C.green:gdpUs>0?C.gold:C.red},
           {label:"인플레·원자재",
-           val:av.gold>3000&&av.wti>80?"주의":av.gold>2500||av.wti>75?"경계":"안정",
-           detail:`Gold $${av.gold?av.gold.toFixed(0):"—"} · WTI $${av.wti?av.wti.toFixed(1):"—"}`,
-           color:av.gold>3000&&av.wti>80?C.orange:av.gold>2500||av.wti>75?C.gold:C.green},
+           val:goldV>3000&&wtiV>80?"주의":goldV>2500||wtiV>75?"경계":"안정",
+           detail:`Gold $${goldV.toFixed(0)} · WTI $${wtiV.toFixed(1)}`,
+           color:goldV>3000&&wtiV>80?C.orange:goldV>2500||wtiV>75?C.gold:C.green},
         ].map((item,i)=>(
           <div key={i} style={{background:C.bg,borderRadius:5,padding:"9px 12px",
-            border:`1px solid ${item.color||C.border}44`,borderLeft:`3px solid ${item.color||C.dim}`}}>
+            border:`1px solid ${item.color}44`,borderLeft:`3px solid ${item.color}`}}>
             <div style={{fontSize:7.5,color:C.dim,fontFamily:"JetBrains Mono",marginBottom:4}}>{item.label}</div>
-            <div style={{fontSize:13,color:item.color||C.muted,fontWeight:700,fontFamily:"JetBrains Mono",marginBottom:3}}>
-              {item.val||"대기"}
+            <div style={{fontSize:13,color:item.color,fontWeight:700,fontFamily:"JetBrains Mono",marginBottom:3}}>
+              {item.val}
             </div>
             <div style={{fontSize:7.5,color:C.dim,fontFamily:"JetBrains Mono"}}>{item.detail}</div>
           </div>
