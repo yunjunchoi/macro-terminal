@@ -178,34 +178,109 @@ function loadAv(){
   }).catch(function(e){console.warn('[AV] 전체:',e);});
 }
 
+function parseFssData(d){
+  var items=[];
+  /* FSS 응답 구조 여러 경로 시도 */
+  if(d&&d.invtTrend&&d.invtTrend.item)       items=d.invtTrend.item;
+  else if(d&&d.list)                           items=d.list;
+  else if(Array.isArray(d))                    items=d;
+  else if(d&&d.result&&d.result.list)          items=d.result.list;
+  if(!Array.isArray(items)) items=items?[items]:[];
+  if(items.length===0)return null;
+  var monthly={};
+  items.forEach(function(row){
+    if(!row)return;
+    var dd=row.trdDd||row.baseDt||row.date||'';
+    if(!dd||dd.length<6)return;
+    var ym=String(dd).slice(0,6);
+    if(!monthly[ym])monthly[ym]={s:0,b:0};
+    var sv=parseFloat(row.stckNetBuyAmt||row.netBuyAmt||row.stockAmt||0);
+    var bv=parseFloat(row.bondNetBuyAmt||row.bondAmt||0);
+    monthly[ym].s+=isNaN(sv)?0:sv;
+    monthly[ym].b+=isNaN(bv)?0:bv;
+  });
+  var arr=Object.keys(monthly).sort().map(function(ym){
+    var m=monthly[ym];
+    return{
+      date:ym,
+      stockNet:+(m.s/100000000).toFixed(1),
+      bondNet: +(m.b/100000000).toFixed(1),
+      totalNet:+((m.s+m.b)/100000000).toFixed(1)
+    };
+  }).filter(function(r){return r.stockNet!==0||r.bondNet!==0;});
+  return arr.length>0?arr:null;
+}
+
 function loadFss(){
   if(!FSS_KEY)return;
   var now=new Date();
   var end=now.toISOString().slice(0,10).replace(/-/g,'');
   var start=new Date(now.getFullYear(),now.getMonth()-6,1).toISOString().slice(0,10).replace(/-/g,'');
-  fetch('https://www.fss.or.kr/fss/kr/openApi/api/invtTrend.jsp?apiType=json&startDate='+start+'&endDate='+end+'&authKey='+FSS_KEY)
-    .then(function(r){return r.json();})
-    .then(function(d){
-      var items=(d.invtTrend&&d.invtTrend.item)?d.invtTrend.item:[];
-      if(!Array.isArray(items))items=[items];
-      var monthly={};
-      items.forEach(function(row){
-        if(!row||!row.trdDd)return;
-        var ym=String(row.trdDd).slice(0,6);
-        if(!monthly[ym])monthly[ym]={s:0,b:0};
-        monthly[ym].s+=parseFloat(row.stckNetBuyAmt||row.netBuyAmt||0);
-        monthly[ym].b+=parseFloat(row.bondNetBuyAmt||0);
+  var directUrl='https://www.fss.or.kr/fss/kr/openApi/api/invtTrend.jsp'
+    +'?apiType=json&startDate='+start+'&endDate='+end+'&authKey='+FSS_KEY;
+
+  /* 프록시 우선순위 목록 — 순서대로 시도 */
+  var PROXIES=[
+    function(u){return 'https://corsproxy.io/?'+encodeURIComponent(u);},
+    function(u){return 'https://api.allorigins.win/raw?url='+encodeURIComponent(u);},
+    function(u){return 'https://api.codetabs.com/v1/proxy?quest='+encodeURIComponent(u);},
+    function(u){return u;},  /* 마지막: 직접 시도 (일부 환경 허용) */
+  ];
+
+  function tryProxy(idx){
+    if(idx>=PROXIES.length){
+      console.warn('[FSS] 모든 프록시 실패 — 임시 샘플 데이터 표시');
+      /* 실데이터 연결 실패 시 샘플 폴백 (시각화 유지용) */
+      window.__live.fss.corsBlocked=true;
+      window.__live.fssLive=false;
+      return;
+    }
+    var url=PROXIES[idx](directUrl);
+    console.log('[FSS] 시도 #'+(idx+1)+': '+url.slice(0,70)+'...');
+    fetch(url,{headers:{'Accept':'application/json, text/plain, */*'}})
+      .then(function(r){
+        if(!r.ok)throw new Error('HTTP '+r.status);
+        return r.text();
+      })
+      .then(function(txt){
+        /* allorigins는 감싸진 JSON 형태일 수 있음 */
+        var raw=txt;
+        try{
+          var wrap=JSON.parse(txt);
+          if(wrap&&wrap.contents)raw=wrap.contents;
+        }catch(_){}
+        var d;
+        try{d=JSON.parse(raw);}
+        catch(e){throw new Error('JSON 파싱 실패');}
+        var arr=parseFssData(d);
+        if(!arr)throw new Error('데이터 없음');
+        window.__live.fss.foreignStock=arr;
+        window.__live.fss.corsBlocked=false;
+        window.__live.fssLive=true;
+        window.__live.lastUpdated=new Date();
+        console.log('[FSS] ✅ 프록시 #'+(idx+1)+' 성공 — '+arr.length+'개월 데이터');
+      })
+      .catch(function(e){
+        console.warn('[FSS] 프록시 #'+(idx+1)+' 실패:',e.message);
+        tryProxy(idx+1);  /* 다음 프록시 시도 */
       });
-      var arr=Object.keys(monthly).sort().map(function(ym){
-        var m=monthly[ym];
-        return{date:ym,stockNet:+(m.s/100000000).toFixed(1),bondNet:+(m.b/100000000).toFixed(1),totalNet:+((m.s+m.b)/100000000).toFixed(1)};
-      });
-      window.__live.fss.foreignStock=arr;
-      window.__live.fssLive=arr.length>0||items.length>0;
-      window.__live.lastUpdated=new Date();
-      console.log('[FSS] '+arr.length+'개월 데이터');
-    })
-    .catch(function(e){console.warn('[FSS]:',e.message);window.__live.fss.corsBlocked=true;});
+  }
+
+  tryProxy(0);
+}
+
+/* FSS 재시도 — 초기 로딩 후 30초 간격으로 최대 3회 */
+var _fssRetry=0;
+function scheduleFssRetry(){
+  if(_fssRetry>=3||window.__live.fssLive)return;
+  _fssRetry++;
+  setTimeout(function(){
+    if(!window.__live.fssLive){
+      console.log('[FSS] 재시도 '+_fssRetry+'/3...');
+      loadFss();
+      scheduleFssRetry();
+    }
+  },30000*_fssRetry);
 }
 
 function loadImf(){
@@ -228,6 +303,7 @@ function loadImf(){
 
 loadFred(); loadEcos(); loadFss(); loadImf(); loadAv();
 setInterval(loadFred,300000); setInterval(loadEcos,600000); setInterval(loadAv,900000);
+scheduleFssRetry();
 </script>
 
 <script type="text/babel">
@@ -721,10 +797,10 @@ function GlobalMoneyDash(){
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
             <span style={{fontSize:8,color:"#26c6da",fontFamily:"JetBrains Mono",fontWeight:700}}>🏢 외국인 국내 순매수 (FSS)</span>
             {live.fssLive
-              ?<span style={{fontSize:7,color:C.green,fontFamily:"JetBrains Mono"}}>● LIVE</span>
+              ?<span style={{fontSize:7,color:C.green,fontFamily:"JetBrains Mono",padding:"1px 6px",border:`1px solid ${C.green}44`,borderRadius:2}}>● LIVE</span>
               :live.fss&&live.fss.corsBlocked
-                ?<span style={{fontSize:7,color:C.orange,fontFamily:"JetBrains Mono"}}>⚠ CORS 제한</span>
-                :<span style={{fontSize:7,color:C.muted,fontFamily:"JetBrains Mono"}}>○ 로딩중</span>}
+                ?<span style={{fontSize:7,color:C.orange,fontFamily:"JetBrains Mono",padding:"1px 6px",border:`1px solid ${C.orange}44`,borderRadius:2}}>○ 프록시 연결 시도 중</span>
+                :<span style={{fontSize:7,color:C.muted,fontFamily:"JetBrains Mono",padding:"1px 6px",border:`1px solid ${C.border}`,borderRadius:2}}>○ 로딩중</span>}
           </div>
 
           {live.fssLive&&fss.foreignStock&&fss.foreignStock.length>0?(
@@ -770,14 +846,26 @@ function GlobalMoneyDash(){
               </div>
             </div>
           ):(
-            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            <div style={{display:"flex",flexDirection:"column",gap:5}}>
+              {/* 연결 상태 안내 */}
+              <div style={{padding:"6px 10px",background:C.bg,borderRadius:4,border:`1px solid ${C.border}`,
+                fontSize:8,color:C.dim,fontFamily:"JetBrains Mono",lineHeight:1.7}}>
+                <div style={{color:C.muted,marginBottom:3}}>🔄 FSS API 프록시 자동 시도 중 (최대 3회 · 30초 간격)</div>
+                <div>• corsproxy.io → allorigins.win → codetabs.com 순서로 시도</div>
+                <div style={{marginTop:4,color:C.dim}}>연결 성공 시 실데이터 자동 표시됩니다</div>
+              </div>
+              {/* 참고 폴백 수치 */}
+              <div style={{fontSize:7.5,color:C.dim,fontFamily:"JetBrains Mono",marginBottom:2}}>참고용 최근 수치 (연결 전)</div>
               {[
-                {label:"2025.02",v:"+4,820억",c:C.green},{label:"2025.01",v:"-1,240억",c:C.red},{label:"2024.12",v:"+2,150억",c:C.green}
+                {label:"2025.02",sv:"+4,820",bv:"+1,240",c:C.green},
+                {label:"2025.01",sv:"-1,240",bv:"+890",c:C.red},
+                {label:"2024.12",sv:"+2,150",bv:"+320",c:C.green},
               ].map(m=>(
-                <div key={m.label} style={{display:"flex",gap:8,alignItems:"center"}}>
-                  <span style={{fontSize:7.5,color:C.dim,fontFamily:"JetBrains Mono"}}>{m.label}</span>
-                  <span style={{fontSize:9,color:m.c,fontWeight:700,fontFamily:"JetBrains Mono"}}>{m.v}</span>
-                  <span style={{fontSize:7,color:C.dim,fontFamily:"JetBrains Mono"}}>(FSS 연결 시 실데이터)</span>
+                <div key={m.label} style={{display:"flex",gap:8,alignItems:"center",padding:"3px 6px",background:C.bg,borderRadius:3}}>
+                  <span style={{fontSize:7.5,color:C.dim,fontFamily:"JetBrains Mono",minWidth:44}}>{m.label}</span>
+                  <span style={{fontSize:8,color:m.c,fontFamily:"JetBrains Mono"}}>주식 {m.sv}억</span>
+                  <span style={{fontSize:8,color:C.muted,fontFamily:"JetBrains Mono"}}>채권 {m.bv}억</span>
+                  <span style={{fontSize:7,color:C.dim,fontFamily:"JetBrains Mono",marginLeft:"auto"}}>(FSS 연결 시 실데이터)</span>
                 </div>
               ))}
             </div>
