@@ -23,6 +23,7 @@ input[type=range].gold::-webkit-slider-thumb{background:#f0b429;box-shadow:0 0 8
 .btn.active{border-color:#00d4ff;background:#00d4ff18;color:#00d4ff;}
 .btn.gold-active{border-color:#f0b429;background:#f0b42918;color:#f0b429;}
 .btn.green-active{border-color:#00e676;background:#00e67618;color:#00e676;}
+@keyframes shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}
 </style>
 </head>
 <body>
@@ -1738,110 +1739,155 @@ function LiveRatesPanel(){
 }
 
 /* ════════════════════════════════════════════
-   🤖 AI 시장 브리핑 (Claude API)
+   📋 시장 브리핑 엔진 (로컬 규칙 기반)
+   CORS 없이 브라우저에서 직접 실행
 ════════════════════════════════════════════ */
+function generateBriefing(live){
+  const fred=live.fred||{};
+  const ecos=live.ecos||{};
+  const av=live.av||{};
+  const imf=(live.imf&&live.imf.gdp)||{};
+  const fss=live.fss||{};
+
+  // ── 핵심 지표 추출 ──
+  const fedRate=fred.fedRate||4.25;
+  const us10y=fred.rate10y||4.52;
+  const us2y=fred.rate2y||4.18;
+  const spread=+(us10y-us2y).toFixed(2);
+  const cpi=fred.cpi||3.2;
+  const unemp=fred.unemployment||4.1;
+  const bokRate=ecos.baseRate||2.75;
+  const kr10y=ecos.bond10y||3.02;
+  const usKrSpread=+(us10y-kr10y).toFixed(2);
+  const gold=av.gold||3018;
+  const wti=av.wti||68;
+  const goldSilver=av.silver>0?(av.gold/av.silver):90;
+  const fssLatest=fss.foreignStock&&fss.foreignStock.length>0?fss.foreignStock[fss.foreignStock.length-1]:null;
+  const gdpKr=imf.kr||2.1;
+  const gdpUs=imf.us||2.8;
+  const gdpCn=imf.cn||4.8;
+
+  // ── 국면 판단 ──
+  const isInverted=spread<0;
+  const isTightening=fedRate>4.0;
+  const isHighGold=gold>2500;
+  const isHighOil=wti>85;
+  const isLowOil=wti<65;
+  const isForeignBuying=fssLatest&&fssLatest.stockNet>0;
+  const isForeignSelling=fssLatest&&fssLatest.stockNet<-2000;
+  const isHighCarry=usKrSpread>1.5;
+  const isRiskOff=isHighGold&&(isInverted||cpi>4);
+  const isRiskOn=!isInverted&&cpi<3.5&&unemp<4.5;
+  const isGoldSilverHighRatio=goldSilver>85;
+
+  // ── 국면 텍스트 ──
+  let phase="";
+  if(isInverted&&cpi>3){
+    phase="현재 미국 수익률 곡선이 역전 상태("+spread+"%p)를 유지하며, CPI "+cpi+"%로 인플레이션 압력이 잔존합니다. Fed는 고금리를 장기 유지할 가능성이 높으며 글로벌 유동성이 제한된 환경입니다. 한국은 미-한 금리차("+usKrSpread+"%p)로 인한 자본 유출 압력에 노출되어 있습니다.";
+  } else if(!isInverted&&cpi<3&&unemp<4.5){
+    phase="미국 수익률 곡선이 정상화(스프레드 "+spread+"%p)되고 CPI "+cpi+"%로 인플레 둔화 흐름이 뚜렷합니다. Fed 피벗 기대가 살아 있으며 리스크 자산 전반에 우호적인 환경입니다. 한국 입장에서 BOK 금리("+bokRate+"%)+외국인 유입 가능성에 주목해야 할 시점입니다.";
+  } else if(isRiskOff){
+    phase="금(Gold $"+gold.toFixed(0)+")+고유가+금리 역전이 동시에 나타나며 전형적인 리스크오프 국면 신호가 혼재합니다. 안전자산 선호가 강화되는 환경으로, KOSPI 외국인 수급과 원달러 환율 방향이 핵심 변수입니다.";
+  } else {
+    phase="주요 거시지표가 혼재된 양상입니다. Fed 기준금리 "+fedRate+"%, 미국 10Y "+us10y+"%, 한국 BOK "+bokRate+"%로 각국 통화정책 방향성 차별화가 진행 중입니다. 당분간 개별 이벤트(FOMC·BOK 결정) 대응이 중요합니다.";
+  }
+
+  // ── 리스크 포인트 ──
+  const risks=[];
+  if(isInverted) risks.push("📌 미국 2Y-10Y 수익률 역전 지속("+spread+"%p) — 과거 사례 기준 6~18개월 내 경기침체 선행 지표, 크레딧 리스크 재평가 가능");
+  if(cpi>3.5)    risks.push("📌 미국 CPI "+cpi+"% 목표(2%) 초과 지속 — Fed 금리 인하 지연 → 달러 강세 → 신흥국 자금 이탈 압력");
+  if(isHighCarry) risks.push("📌 미-한 금리차 "+usKrSpread+"%p — 원화 약세·자본 유출 유인 구조 지속, BOK 선제적 인하 여력 제한");
+  if(isForeignSelling) risks.push("📌 외국인 KOSPI 순매도 추세(최근월 "+fssLatest.stockNet+"억원) — 수급 공백 구간, 기관·개인 대응 필요");
+  if(isHighOil)  risks.push("📌 WTI $"+wti.toFixed(1)+"/bbl 고유가 — 한국 수입물가 상승·경상수지 악화·인플레 재점화 리스크");
+  if(gold>3000)  risks.push("📌 금 $"+gold.toFixed(0)+"/oz 사상 최고권 — 지정학·달러 신뢰 약화 반영, 글로벌 리스크오프 전환 선행지표로 모니터링");
+  if(unemp>4.5)  risks.push("📌 미국 실업률 "+unemp+"% 상승 — 소비 둔화·기업 실적 하향 위험, 경기 연착륙 시나리오 재검토 필요");
+  if(gdpCn<4)    risks.push("📌 중국 GDP 성장률 "+gdpCn+"% 둔화 — 한국 대중 수출 의존도(약 20%) 감안 시 반도체·화학 섹터 영향 주시");
+
+  // ── 기회 포인트 ──
+  const opps=[];
+  if(isGoldSilverHighRatio) opps.push("💡 금/은 비율 "+goldSilver.toFixed(1)+"x 역사적 고점권 — 은(Silver) 상대 저평가 구간, 비율 정상화 시 은 아웃퍼폼 기대 가능");
+  if(isForeignBuying)       opps.push("💡 외국인 KOSPI 순매수(최근월 +"+fssLatest.stockNet+"억원) — 수급 개선 모멘텀, 수출 대형주 중심 선별 접근 유효");
+  if(isLowOil)              opps.push("💡 WTI $"+wti.toFixed(1)+"/bbl 저유가 — 한국 수입 비용 절감·경상수지 개선 기대, 항공·화학·정유 섹터 수혜 점검");
+  if(!isInverted&&spread>0.3) opps.push("💡 미국 수익률 곡선 정상화(+"+spread+"%p) — 장기채 매력 회복 구간, 듀레이션 확대 전략 검토 시점");
+  if(gdpKr>=2&&bokRate<fedRate) opps.push("💡 한국 GDP "+gdpKr+"% + BOK 금리 여유("+bokRate+"%) — 주변국 대비 상대적 통화정책 유연성 보유, KOSPI 밸류에이션 매력 부각 가능");
+  if(gdpCn>=4.5) opps.push("💡 중국 GDP "+gdpCn+"% 성장 유지 — 한국 대중 수출 수혜 섹터(반도체·2차전지·기계) 모멘텀 체크");
+  if(av.natgas>0&&av.natgasC>2) opps.push("💡 천연가스 +"+av.natgasC.toFixed(1)+"% 급등 — 에너지 전환·LNG 관련 한국 조선·플랜트 섹터 수혜 가능성");
+
+  // 최소 2개 확보
+  if(opps.length===0) opps.push("💡 현 국면에서 달러·단기채 비중 확대로 변동성 방어 전략 유효","💡 금(Gold) 헤지 비중 일부 유지로 지정학·인플레 리스크 분산 권고");
+
+  // ── 한줄 요약 ──
+  let summary="";
+  if(isInverted&&cpi>3)   summary="🔴 리스크 경계 국면 — 달러 현금+금 헤지 유지, KOSPI 외국인 수급 일별 모니터링 우선";
+  else if(isRiskOn)        summary="🟢 리스크온 환경 — 성장주·KOSPI 비중 확대 검토, 단 Fed 피벗 시점 불확실성 관리 병행";
+  else if(isHighGold)      summary="🟡 혼조 국면 — 안전자산(금·달러) 방어 기조 유지하되 KOSPI 저점 매수 기회 포착 전략 병행";
+  else                     summary="🟡 중립·관망 국면 — FOMC·BOK 결정 전 포지션 중립, 이벤트 결과 후 방향성 추종 전략 권고";
+
+  return {phase,risks:risks.slice(0,3),opps:opps.slice(0,2),summary};
+}
+
 function AIBriefingPanel(){
   const [brief,setBrief]=useState(null);
   const [loading,setLoading]=useState(false);
   const [expanded,setExpanded]=useState(false);
   const [live,setLive]=useState(window.__live||{});
-  const [err,setErr]=useState(null);
+  const [genTime,setGenTime]=useState(null);
 
   useEffect(()=>{
-    const iv=setInterval(()=>{if(window.__live)setLive(Object.assign({},window.__live));},3000);
+    const iv=setInterval(()=>{if(window.__live)setLive(Object.assign({},window.__live));},2000);
     return()=>clearInterval(iv);
   },[]);
 
-  async function runBriefing(){
-    setLoading(true);setErr(null);setBrief(null);setExpanded(true);
-    const fred=live.fred||{};
-    const ecos=live.ecos||{};
-    const av=live.av||{};
-    const imf=live.imf||{gdp:{},bop:{}};
-    const fss=live.fss||{};
-    const now=new Date();
+  // 데이터가 처음 준비되면 자동 실행
+  const prevReady=useRef(false);
+  useEffect(()=>{
+    const ready=live.fredLive||live.ecosLive;
+    if(ready&&!prevReady.current&&!brief){
+      prevReady.current=true;
+      runBriefing();
+    }
+  },[live.fredLive,live.ecosLive]);
 
-    const contextData=`
-[현재 시각] ${now.toLocaleString("ko-KR",{timeZone:"Asia/Seoul"})} KST
-
-[미국 FRED 실데이터]
-- Fed 기준금리: ${fred.fedRate||"N/A"}%
-- 미국 2Y 국채: ${fred.rate2y||"N/A"}%
-- 미국 10Y 국채: ${fred.rate10y||"N/A"}%
-- 2Y-10Y 스프레드: ${fred.rate10y&&fred.rate2y?(fred.rate10y-fred.rate2y).toFixed(2):"N/A"}%p ${fred.rate10y&&fred.rate2y&&fred.rate10y<fred.rate2y?"(역전중⚠)":""}
-- 실업률: ${fred.unemployment||"N/A"}%
-- CPI: ${fred.cpi||"N/A"}%
-- GDP 성장률: ${fred.gdpGrowth||"N/A"}%
-
-[한국 ECOS 실데이터]
-- BOK 기준금리: ${ecos.baseRate||"N/A"}%
-- 국고채 10Y: ${ecos.bond10y||"N/A"}%
-- 미-한 금리차: ${fred.rate10y&&ecos.bond10y?(fred.rate10y-ecos.bond10y).toFixed(2):"N/A"}%p
-- 외환보유액: ${ecos.fxReserves||"N/A"}억$
-- 경상수지(최신): ${ecos.bopMonthly&&ecos.bopMonthly.length>0?ecos.bopMonthly[ecos.bopMonthly.length-1].value+"억$":"N/A"}
-
-[Alpha Vantage 원자재]
-- Gold: $${av.gold||"N/A"}/oz (${av.goldC!=null?(av.goldC>0?"+":"")+av.goldC?.toFixed(2)+"%":"N/A"})
-- WTI: $${av.wti||"N/A"}/bbl (${av.wtiC!=null?(av.wtiC>0?"+":"")+av.wtiC?.toFixed(2)+"%":"N/A"})
-- NatGas: $${av.natgas||"N/A"}/MMBtu (${av.natgasC!=null?(av.natgasC>0?"+":"")+av.natgasC?.toFixed(2)+"%":"N/A"})
-- Gold/Silver 비율: ${av.gold&&av.silver?(av.gold/av.silver).toFixed(1)+"x":"N/A"}
-
-[IMF GDP 성장률 2024]
-- 한국: ${imf.gdp.kr||"N/A"}% / 미국: ${imf.gdp.us||"N/A"}% / 중국: ${imf.gdp.cn||"N/A"}% / 일본: ${imf.gdp.jp||"N/A"}%
-
-[FSS 외국인 투자 (최신)]
-${fss.foreignStock&&fss.foreignStock.length>0?fss.foreignStock.slice(-3).map(m=>`- ${m.date}: 주식 ${m.stockNet}억 / 채권 ${m.bondNet}억`).join("\n"):"데이터 로드 중"}
-`;
-
-    try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",
-          max_tokens:1000,
-          system:"당신은 글로벌 매크로 애널리스트입니다. 주어진 실시간 데이터를 바탕으로 한국 투자자 관점에서 오늘의 시장 브리핑을 작성하세요. 반드시 한국어로 답변하세요. 포맷: ① 현재 시장 국면 (2-3줄) ② 주목할 리스크 포인트 3가지 (bullet) ③ 기회 포인트 2가지 (bullet) ④ 한줄 요약. 총 300자 내외로 간결하게.",
-          messages:[{role:"user",content:"다음 실시간 데이터를 분석해주세요:\n"+contextData}]
-        })
-      });
-      if(!res.ok){const e=await res.json();throw new Error(e.error&&e.error.message||"API 오류");}
-      const d=await res.json();
-      const txt=d.content&&d.content[0]&&d.content[0].text||"응답 없음";
-      setBrief(txt);
-    }catch(e){
-      setErr("분석 오류: "+e.message);
-    }finally{setLoading(false);}
+  function runBriefing(){
+    setLoading(true);setBrief(null);setExpanded(true);
+    // 짧은 딜레이로 "분석 중" 효과
+    setTimeout(()=>{
+      const result=generateBriefing(window.__live||live);
+      setBrief(result);
+      setGenTime(new Date());
+      setLoading(false);
+    },820);
   }
 
   const dataReady=live.fredLive||live.ecosLive;
+  const dataSources=[
+    live.fredLive&&"FRED",live.ecosLive&&"ECOS",live.avLive&&"AV",live.imfLive&&"IMF",live.fssLive&&"FSS"
+  ].filter(Boolean).join(" · ");
 
   return(
-    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:8,overflow:"hidden",marginBottom:0}}>
+    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:8,overflow:"hidden"}}>
+
+      {/* 헤더 */}
       <div style={{padding:"9px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",
-        background:expanded?"#0a0f1c":C.panel2,borderBottom:expanded?`1px solid ${C.border}`:"none",
+        background:expanded?"#080d1a":C.panel2,borderBottom:expanded?`1px solid ${C.border}`:"none",
         transition:"background .2s"}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
           <div style={{width:3,height:22,background:C.purple,borderRadius:2}}/>
-          <span style={{fontFamily:"Space Grotesk",fontSize:13,fontWeight:700,color:C.purple,letterSpacing:"0.06em"}}>🤖 AI 시장 브리핑</span>
-          <span style={{fontSize:9,color:C.muted,fontFamily:"JetBrains Mono"}}>Claude가 실시간 데이터를 분석 · FRED+ECOS+AV</span>
+          <span style={{fontFamily:"Space Grotesk",fontSize:13,fontWeight:700,color:C.purple,letterSpacing:"0.06em"}}>📋 매크로 시장 브리핑</span>
+          <span style={{fontSize:9,color:C.muted,fontFamily:"JetBrains Mono"}}>실시간 데이터 자동 분석 · FRED+ECOS+AV+IMF+FSS</span>
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          {!dataReady&&<span style={{fontSize:8,color:C.orange,fontFamily:"JetBrains Mono"}}>⚠ 데이터 로딩 중</span>}
-          {dataReady&&!loading&&(
-            <button onClick={runBriefing} style={{
-              padding:"5px 14px",borderRadius:5,border:`1px solid ${C.purple}`,
-              background:C.purple+"22",color:C.purple,fontFamily:"JetBrains Mono",
-              fontSize:10,fontWeight:700,cursor:"pointer",transition:"all .15s",
-              letterSpacing:"0.05em"
-            }}>
-              {brief?"🔄 재분석":"⚡ 지금 분석"}
-            </button>
-          )}
-          {loading&&(
-            <span style={{fontSize:10,color:C.purple,fontFamily:"JetBrains Mono",animation:"none"}}>
-              ◌ 분석 중...
-            </span>
-          )}
+          {genTime&&<span style={{fontSize:8,color:C.dim,fontFamily:"JetBrains Mono"}}>{genTime.toLocaleTimeString("ko-KR",{hour12:false})} 생성</span>}
+          {!dataReady&&<span style={{fontSize:8,color:C.orange,fontFamily:"JetBrains Mono"}}>○ 데이터 로딩 중...</span>}
+          {dataReady&&<span style={{fontSize:8,color:C.green,fontFamily:"JetBrains Mono"}}>● {dataSources}</span>}
+          <button onClick={runBriefing} disabled={loading} style={{
+            padding:"5px 14px",borderRadius:5,border:`1px solid ${C.purple}`,
+            background:loading?C.purple+"11":C.purple+"22",color:loading?C.dim:C.purple,
+            fontFamily:"JetBrains Mono",fontSize:10,fontWeight:700,
+            cursor:loading?"default":"pointer",transition:"all .15s",letterSpacing:"0.05em"
+          }}>
+            {loading?"◌ 분석 중...":"🔄 재분석"}
+          </button>
           <button onClick={()=>setExpanded(e=>!e)} style={{
             padding:"4px 10px",borderRadius:4,border:`1px solid ${C.border}`,
             background:"transparent",color:C.muted,fontFamily:"JetBrains Mono",
@@ -1852,44 +1898,87 @@ ${fss.foreignStock&&fss.foreignStock.length>0?fss.foreignStock.slice(-3).map(m=>
 
       {expanded&&(
         <div style={{padding:"14px 18px"}}>
-          {!brief&&!loading&&!err&&(
-            <div style={{textAlign:"center",padding:"24px 0",color:C.dim,fontFamily:"JetBrains Mono",fontSize:11}}>
-              <div style={{fontSize:28,marginBottom:10}}>🤖</div>
-              <div>⚡ 지금 분석 버튼을 눌러 현재 시장 브리핑을 요청하세요</div>
-              <div style={{fontSize:9,color:C.dim,marginTop:6}}>
-                {dataReady
-                  ?`FRED${live.fredLive?" ✓":""} · ECOS${live.ecosLive?" ✓":""} · AV${live.avLive?" ✓":""} 데이터 사용`
-                  :"API 데이터 수신 대기 중..."}
-              </div>
-            </div>
-          )}
+
+          {/* 로딩 */}
           {loading&&(
-            <div style={{textAlign:"center",padding:"20px 0"}}>
-              <div style={{fontSize:26,marginBottom:8}}>⚙️</div>
-              <div style={{color:C.purple,fontFamily:"JetBrains Mono",fontSize:11}}>Claude가 실시간 데이터를 분석 중입니다...</div>
-              <div style={{fontSize:9,color:C.dim,marginTop:4}}>FRED · ECOS · AV · IMF · FSS 데이터 종합 분석</div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {["현재 시장 국면 분석 중...","리스크 포인트 평가 중...","기회 요인 탐색 중..."].map((t,i)=>(
+                <div key={i} style={{height:14,background:C.border,borderRadius:4,overflow:"hidden",position:"relative"}}>
+                  <div style={{
+                    position:"absolute",top:0,left:0,height:"100%",width:"60%",
+                    background:`linear-gradient(90deg, transparent, ${C.purple}44, transparent)`,
+                    animation:"shimmer 1.2s infinite",
+                    transform:"translateX(-100%)",
+                  }}/>
+                  <span style={{position:"absolute",left:10,top:0,fontSize:8,color:C.dim,lineHeight:"14px",fontFamily:"JetBrains Mono"}}>{t}</span>
+                </div>
+              ))}
             </div>
           )}
-          {err&&(
-            <div style={{padding:"12px 14px",background:C.red+"11",border:`1px solid ${C.red}44`,borderRadius:6,
-              color:C.red,fontFamily:"JetBrains Mono",fontSize:10}}>{err}</div>
+
+          {/* 대기 */}
+          {!brief&&!loading&&(
+            <div style={{textAlign:"center",padding:"20px 0",color:C.dim,fontFamily:"JetBrains Mono",fontSize:10}}>
+              데이터 수신 후 자동으로 분석을 시작합니다...
+            </div>
           )}
-          {brief&&(
-            <div style={{background:"#090e1e",border:`1px solid ${C.purple}33`,borderRadius:6,padding:"14px 16px"}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
-                <span style={{fontSize:9,color:C.purple,fontFamily:"JetBrains Mono",fontWeight:700}}>
-                  📋 AI 분석 결과
-                </span>
-                <span style={{fontSize:8,color:C.dim,fontFamily:"JetBrains Mono"}}>
-                  {new Date().toLocaleString("ko-KR",{timeZone:"Asia/Seoul",hour:"2-digit",minute:"2-digit"})} KST
-                  {live.fredLive&&" · FRED ●"}{live.ecosLive&&" · ECOS ●"}{live.avLive&&" · AV ●"}
-                </span>
+
+          {/* 결과 */}
+          {brief&&!loading&&(
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+
+              {/* ① 현재 국면 */}
+              <div style={{padding:"12px 14px",background:"#060b16",borderRadius:6,
+                border:`1px solid ${C.purple}44`,borderLeft:`3px solid ${C.purple}`}}>
+                <div style={{fontSize:8.5,color:C.purple,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:7,
+                  letterSpacing:"0.12em",textTransform:"uppercase"}}>① 현재 시장 국면</div>
+                <div style={{color:C.text,fontFamily:"JetBrains Mono",fontSize:11,lineHeight:1.75}}>{brief.phase}</div>
               </div>
-              <div style={{color:C.text,fontFamily:"JetBrains Mono",fontSize:11.5,lineHeight:1.8,whiteSpace:"pre-wrap"}}>
-                {brief}
+
+              {/* ② 리스크 + ③ 기회 나란히 */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div style={{padding:"12px 14px",background:"#060b16",borderRadius:6,
+                  border:`1px solid ${C.red}33`,borderLeft:`3px solid ${C.red}`}}>
+                  <div style={{fontSize:8.5,color:C.red,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:8,
+                    letterSpacing:"0.12em",textTransform:"uppercase"}}>② 주목할 리스크</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {brief.risks.map((r,i)=>(
+                      <div key={i} style={{fontSize:10.5,color:"#d0dbe8",fontFamily:"JetBrains Mono",lineHeight:1.65,
+                        paddingBottom:i<brief.risks.length-1?8:0,
+                        borderBottom:i<brief.risks.length-1?`1px solid ${C.border}`:"none"}}>{r}</div>
+                    ))}
+                  </div>
+                </div>
+                <div style={{padding:"12px 14px",background:"#060b16",borderRadius:6,
+                  border:`1px solid ${C.green}33`,borderLeft:`3px solid ${C.green}`}}>
+                  <div style={{fontSize:8.5,color:C.green,fontFamily:"JetBrains Mono",fontWeight:700,marginBottom:8,
+                    letterSpacing:"0.12em",textTransform:"uppercase"}}>③ 기회 포인트</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {brief.opps.map((o,i)=>(
+                      <div key={i} style={{fontSize:10.5,color:"#d0dbe8",fontFamily:"JetBrains Mono",lineHeight:1.65,
+                        paddingBottom:i<brief.opps.length-1?8:0,
+                        borderBottom:i<brief.opps.length-1?`1px solid ${C.border}`:"none"}}>{o}</div>
+                    ))}
+                  </div>
+                </div>
               </div>
-              <div style={{marginTop:10,paddingTop:8,borderTop:`1px solid ${C.border}`,fontSize:8,color:C.dim,fontFamily:"JetBrains Mono"}}>
-                ⚠ AI 분석은 참고용입니다. 투자 결정 전 반드시 전문가 의견을 확인하세요.
+
+              {/* ④ 한줄 요약 */}
+              <div style={{padding:"10px 14px",background:"#07111e",borderRadius:6,
+                border:`1px solid ${C.gold}44`,display:"flex",alignItems:"center",gap:10}}>
+                <div style={{width:3,height:36,background:C.gold,borderRadius:2,flexShrink:0}}/>
+                <div>
+                  <div style={{fontSize:8,color:C.gold,fontFamily:"JetBrains Mono",fontWeight:700,
+                    letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:4}}>④ 한줄 요약</div>
+                  <div style={{color:C.gold,fontFamily:"JetBrains Mono",fontSize:11.5,fontWeight:700,lineHeight:1.5}}>{brief.summary}</div>
+                </div>
+              </div>
+
+              {/* 데이터 출처 */}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                paddingTop:6,fontSize:8,color:C.dim,fontFamily:"JetBrains Mono"}}>
+                <span>📊 데이터 기반: {dataSources||"대기 중"} · 규칙 기반 자동 생성</span>
+                <span>⚠ 참고용 · 투자 결정 전 전문가 확인 필요</span>
               </div>
             </div>
           )}
